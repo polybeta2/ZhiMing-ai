@@ -13,13 +13,12 @@ struct AppearanceSettingsView: View {
                         Circle()
                             .fill(AppTheme.accentPresets[index])
                             .frame(width: 36, height: 36)
-                            .overlay {
-                                if accentIndex == index {
-                                    Image(systemName: "checkmark")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.white)
-                                }
-                            }
+                            .overlay(
+                                Image(systemName: "checkmark")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.white)
+                                    .opacity(accentIndex == index ? 1 : 0)
+                            )
                             .onTapGesture { accentIndex = index }
                     }
                     Spacer()

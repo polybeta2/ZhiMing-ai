@@ -81,7 +81,17 @@ cd ZhiMing
 
 ### 与原计划的偏离说明
 
-原计划采用 SwiftData；因 xtool 的 Linux 交叉编译工具链无法加载 SwiftData 闭源宏插件（[xtool-org/xtool#149](https://github.com/xtool-org/xtool/issues/149)），持久层改为等价的零依赖方案：`@Observable` 模型类（字段/关系/级联语义不变）+ `AppStore` JSON 文档原子持久化。服务层、提示词模板、上下文装配逻辑均按原计划落地。
+原计划采用 SwiftData；因 xtool 的 Linux 交叉编译工具链无法加载 SwiftData 闭源宏插件（[xtool-org/xtool#149](https://github.com/xtool-org/xtool/issues/149)），持久层改为等价的零依赖方案：`ObservableObject` 模型类（字段/关系/级联语义不变）+ `AppStore` JSON 文档原子持久化。服务层、提示词模板、上下文装配逻辑均按原计划落地。
+
+### iOS 15 兼容层（v1.1）
+
+原计划基于 iOS 17；v1.1 将部署目标降至 **iOS 15**，在 `Sources/ZhiMing/Services/Compat.swift` 集中提供高版本 API 的降级等价物：
+
+- `@Observable/@Bindable/@Environment(Model.self)` → `ObservableObject + @Published` + `@StateObject/@ObservedObject/@EnvironmentObject`
+- `NavigationStack/navigationDestination` → `CompatNavigationView`（16+ 走 Stack，15 走 NavigationView）+ 隐藏 `NavigationLink(isActive:)`
+- `ContentUnavailableView` → `EmptyStateView`；alert 内嵌 TextField → `RenameSheet`
+- `TextField(axis: .vertical)` → `MultilineField`（TextEditor 基）；TextEditor 深色底用 UITextView 外观统一处理
+- 其余：`ShapeStyle.opacity`/`Color.gradient`/两参 `onChange`/`Task.sleep(for:)`/`URL.appending(path:)` 等逐项替换为 iOS 15 可用写法
 
 ## 🙏 致谢
 

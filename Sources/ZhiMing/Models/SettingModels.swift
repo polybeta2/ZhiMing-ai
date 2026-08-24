@@ -1,21 +1,20 @@
 import Foundation
-import Observation
+import Combine
 
-@Observable
-final class CharacterCard: Identifiable, Codable {
+final class CharacterCard: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var name: String
-    var aliases: [String]
-    var appearance: String?
-    var personality: String?
-    var background: String?
-    var currentGoal: String?
-    var currentLocation: String?
-    var physicalState: String?
-    var mentalState: String?
-    var lastSeenChapterTitle: String?
-    var isSceneRelevant: Bool            // 是否参与近期剧情（续写时优先进上下文）
-    @ObservationIgnored weak var novel: Novel?
+    @Published var name: String
+    @Published var aliases: [String]
+    @Published var appearance: String?
+    @Published var personality: String?
+    @Published var background: String?
+    @Published var currentGoal: String?
+    @Published var currentLocation: String?
+    @Published var physicalState: String?
+    @Published var mentalState: String?
+    @Published var lastSeenChapterTitle: String?
+    @Published var isSceneRelevant: Bool            // 是否参与近期剧情（续写时优先进上下文）
+    weak var novel: Novel?
 
     init(id: UUID = UUID(), name: String) {
         self.id = id
@@ -30,7 +29,7 @@ final class CharacterCard: Identifiable, Codable {
         case lastSeenChapterTitle, isSceneRelevant
     }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
@@ -63,13 +62,12 @@ final class CharacterCard: Identifiable, Codable {
     }
 }
 
-@Observable
-final class WorldEntry: Identifiable, Codable {
+final class WorldEntry: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var category: String                 // 地点 / 势力 / 规则 / 物品 / 其他
-    var name: String
-    var content: String
-    @ObservationIgnored weak var novel: Novel?
+    @Published var category: String                 // 地点 / 势力 / 规则 / 物品 / 其他
+    @Published var name: String
+    @Published var content: String
+    weak var novel: Novel?
 
     init(id: UUID = UUID(), category: String, name: String, content: String = "") {
         self.id = id
@@ -80,7 +78,7 @@ final class WorldEntry: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey { case id, category, name, content }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         category = try c.decode(String.self, forKey: .category)

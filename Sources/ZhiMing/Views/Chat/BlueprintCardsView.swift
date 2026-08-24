@@ -3,7 +3,7 @@ import SwiftUI
 /// 蓝图可编辑卡片组：书名/主题/梗概/视角/风格 + 角色列表 + 世界观列表 + 卷纲章纲
 /// 每条可就地编辑、删除；条目可新增
 struct BlueprintCardsView: View {
-    @Bindable var vm: CreationSessionViewModel
+    @ObservedObject var vm: CreationSessionViewModel
 
     /// 桥接为无条件绑定（仅在 blueprint 非空时展示本视图）
     private var bp: Binding<NovelBlueprint> {
@@ -45,8 +45,7 @@ struct BlueprintCardsView: View {
                 .font(.headline)
             TextField("主题与基调", text: str(bp.theme))
                 .font(.subheadline)
-            TextField("故事梗概", text: str(bp.synopsis), axis: .vertical)
-                .lineLimit(2...6)
+            MultilineField(text: str(bp.synopsis), placeholder: "故事梗概", minHeight: 56)
                 .font(.subheadline)
             HStack {
                 TextField("叙事视角", text: str(bp.perspective))
@@ -107,8 +106,7 @@ struct BlueprintCardsView: View {
                             vm.blueprint?.worldbuilding.removeAll { $0.id == entry.id }
                         }
                     }
-                    TextField("设定内容", text: str($entry.content), axis: .vertical)
-                        .lineLimit(1...4)
+                    MultilineField(text: str($entry.content), placeholder: "设定内容", minHeight: 40)
                         .font(.caption)
                 }
                 .padding(AppTheme.spacing[1])
@@ -135,8 +133,7 @@ struct BlueprintCardsView: View {
                             vm.blueprint?.volumes.removeAll { $0.id == volume.id }
                         }
                     }
-                    TextField("卷纲", text: str($volume.outline), axis: .vertical)
-                        .lineLimit(1...4)
+                    MultilineField(text: str($volume.outline), placeholder: "卷纲", minHeight: 40)
                         .font(.caption)
 
                     ForEach($volume.chapters) { $chapter in
@@ -144,8 +141,7 @@ struct BlueprintCardsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 TextField("章标题", text: str($chapter.title))
                                     .font(.caption.weight(.medium))
-                                TextField("细纲", text: str($chapter.detailed_outline), axis: .vertical)
-                                    .lineLimit(1...3)
+                                MultilineField(text: str($chapter.detailed_outline), placeholder: "细纲", minHeight: 36)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -189,6 +185,6 @@ struct BlueprintCardsView: View {
                 .font(.caption)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.tint)
+        .foregroundStyle(Color.accentColor)
     }
 }

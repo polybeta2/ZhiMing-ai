@@ -3,7 +3,7 @@ import SwiftUI
 /// 卷→章两级列表；章级操作菜单（新增/重命名/删除/上移下移）
 /// 章行：标题 + 字数 + 摘要状态徽标（已建档/未建档）
 struct ChapterListView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     let novel: Novel
 
     @State private var renaming: Chapter?
@@ -25,51 +25,20 @@ struct ChapterListView: View {
                 }
             }
             ForEach(novel.sortedVolumes) { volume in
-                Section(volume.name) {
-                    ForEach(volume.sortedChapters) { chapter in
-                        NavigationLink {
-                            ChapterEditorView(chapter: chapter)
-                        } label: {
-                            ChapterRow(chapter: chapter)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button {
-                                renameText = chapter.title
-                                renaming = chapter
-                            } label: {
-                                Label("重命名", systemImage: "pencil")
-                            }
-                            Button {
-                                move(chapter, in: volume, up: true)
-                            } label: {
-                                Label("上移", systemImage: "arrow.up")
-                            }
-                            .disabled(chapter.id == volume.sortedChapters.first?.id)
-                            Button {
-                                move(chapter, in: volume, up: false)
-                            } label: {
-                                Label("下移", systemImage: "arrow.down")
-                            }
-                            .disabled(chapter.id == volume.sortedChapters.last?.id)
-                            Button(role: .destructive) {
-                                deleting = chapter
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
-                        }
-                    }
-                    Button {
-                        addChapter(to: volume)
-                    } label: {
-                        Label("新增章节", systemImage: "plus.circle")
-                            .font(.subheadline)
-                    }
-                }
+                VolumeSection(
+                    store: store,
+                    novel: novel,
+                    volume: volume,
+                    onRename: { chapter in
+                        renameText = chapter.title
+                        renaming = chapter
+                    },
+                    onDelete: { deleting = $0 }
+                )
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     addVolume()
                 } label: {
@@ -77,19 +46,18 @@ struct ChapterListView: View {
                 }
             }
         }
-        .alert("重命名章节", isPresented: Binding(
+        .sheet(isPresented: Binding(
             get: { renaming != nil },
             set: { if !$0 { renaming = nil } }
         )) {
-            TextField("章节标题", text: $renameText)
-            Button("取消", role: .cancel) { renaming = nil }
-            Button("保存") {
+            RenameSheet(
+                title: "重命名章节",
+                placeholder: "章节标题",
+                initialText: renameText
+            ) { newValue in
                 if let chapter = renaming {
-                    let trimmed = renameText.trimmingCharacters(in: .whitespaces)
-                    if !trimmed.isEmpty {
-                        chapter.title = trimmed
-                        store.save()
-                    }
+                    chapter.title = newValue
+                    store.save()
                 }
                 renaming = nil
             }
@@ -117,15 +85,66 @@ struct ChapterListView: View {
         novel.volumes.append(volume)
         store.save()
     }
+}
 
-    private func addChapter(to volume: Volume) {
+/// 单卷区块：观察 volume 自身，章增删/移动即时刷新
+private struct VolumeSection: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var novel: Novel
+    @ObservedObject var volume: Volume
+
+    var onRename: (Chapter) -> Void
+    var onDelete: (Chapter) -> Void
+
+    var body: some View {
+        Section(volume.name) {
+            ForEach(volume.sortedChapters) { chapter in
+                NavigationLink(destination: ChapterEditorView(chapter: chapter)) {
+                    ChapterRow(chapter: chapter)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        onRename(chapter)
+                    } label: {
+                        Label("重命名", systemImage: "pencil")
+                    }
+                    Button {
+                        move(chapter, up: true)
+                    } label: {
+                        Label("上移", systemImage: "arrow.up")
+                    }
+                    .disabled(chapter.id == volume.sortedChapters.first?.id)
+                    Button {
+                        move(chapter, up: false)
+                    } label: {
+                        Label("下移", systemImage: "arrow.down")
+                    }
+                    .disabled(chapter.id == volume.sortedChapters.last?.id)
+                    Button(role: .destructive) {
+                        onDelete(chapter)
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                    }
+                }
+            }
+            Button {
+                addChapter()
+            } label: {
+                Label("新增章节", systemImage: "plus.circle")
+                    .font(.subheadline)
+            }
+        }
+    }
+
+    private func addChapter() {
         let chapter = Chapter(title: "新章 \(volume.chapters.count + 1)", sortOrder: volume.chapters.count + 1)
         chapter.volume = volume
         volume.chapters.append(chapter)
         store.save()
     }
 
-    private func move(_ chapter: Chapter, in volume: Volume, up: Bool) {
+    private func move(_ chapter: Chapter, up: Bool) {
         let sorted = volume.sortedChapters
         guard let index = sorted.firstIndex(where: { $0.id == chapter.id }) else { return }
         let target = up ? index - 1 : index + 1
@@ -138,7 +157,7 @@ struct ChapterListView: View {
 }
 
 private struct ChapterRow: View {
-    let chapter: Chapter
+    @ObservedObject var chapter: Chapter
 
     var body: some View {
         HStack(spacing: AppTheme.spacing[2]) {
@@ -162,7 +181,7 @@ private struct ChapterRow: View {
         if chapter.summary != nil {
             Label("已建档", systemImage: "checkmark.seal.fill")
                 .font(.caption2)
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.green)
         } else {
             Label("未建档", systemImage: "circle.dotted")
                 .font(.caption2)

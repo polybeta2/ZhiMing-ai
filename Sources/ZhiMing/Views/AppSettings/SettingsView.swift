@@ -2,14 +2,12 @@ import SwiftUI
 
 /// 设置页：Kelivo 风格分组卡片（模型与服务 / 外观 / 关于）
 struct SettingsView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
 
     var body: some View {
         List {
             Section("模型与服务") {
-                NavigationLink {
-                    ProviderListView()
-                } label: {
+                NavigationLink(destination: ProviderListView()) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("模型提供商")
@@ -25,15 +23,13 @@ struct SettingsView: View {
                         }
                     } icon: {
                         Image(systemName: "server.rack")
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
             }
 
             Section("外观") {
-                NavigationLink {
-                    AppearanceSettingsView()
-                } label: {
+                NavigationLink(destination: AppearanceSettingsView()) {
                     Label {
                         HStack {
                             Text("强调色与深色模式")
@@ -47,7 +43,7 @@ struct SettingsView: View {
                         }
                     } icon: {
                         Image(systemName: "paintpalette")
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
             }
@@ -55,12 +51,16 @@ struct SettingsView: View {
             Section("关于") {
                 VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
                     HStack(spacing: AppTheme.spacing[2]) {
-                        ZStack {
+                        ZStack(alignment: .center) {
                             RoundedRectangle(cornerRadius: 10)
-                                .fill(AppearanceSettings.accentColor.gradient)
+                                .fill(LinearGradient(
+                                    colors: [AppearanceSettings.accentColor, AppearanceSettings.accentColor.opacity(0.7)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ))
                                 .frame(width: 44, height: 44)
                             Image(systemName: "text.book.closed.fill")
-                                .foregroundStyle(.white)
+                                .foregroundColor(.white)
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             Text("织命").font(.headline)
@@ -69,7 +69,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text("版本 1.0.0 · 数据仅保存在本机")
+                    Text("版本 1.1.0 · 数据仅保存在本机 · 支持 iOS 15+")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     Text("功能理念参考开源项目「司命 siming-ai」，界面气质参考开源项目 Kelivo。")

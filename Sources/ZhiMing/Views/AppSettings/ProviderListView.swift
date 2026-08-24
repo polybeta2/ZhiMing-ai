@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 提供商卡片列表（对标 Kelivo 会话列表卡片行）
 struct ProviderListView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     @State private var editingProvider: ProviderConfig?
     @State private var showNew = false
 
@@ -45,7 +45,7 @@ struct ProviderListView: View {
         }
         .navigationTitle("模型提供商")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     showNew = true
                 } label: {
@@ -63,16 +63,16 @@ struct ProviderListView: View {
 }
 
 private struct ProviderRow: View {
-    let provider: ProviderConfig
+    @ObservedObject var provider: ProviderConfig
 
     var body: some View {
         HStack(spacing: AppTheme.spacing[2]) {
-            ZStack {
+            ZStack(alignment: .center) {
                 Circle()
-                    .fill(.tint.opacity(0.18))
+                    .fill(Color.accentColor.opacity(0.18))
                     .frame(width: 40, height: 40)
                 Image(systemName: provider.isDefault ? "checkmark.seal.fill" : "cpu")
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(Color.accentColor)
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -83,8 +83,8 @@ private struct ProviderRow: View {
                             .font(.caption2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(.tint.opacity(0.15), in: Capsule())
-                            .foregroundStyle(.tint)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
                 Text(provider.modelName)

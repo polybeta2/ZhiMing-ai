@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 世界观条目编辑：分类 + 名称 + 内容
 struct WorldEditView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     let novel: Novel
@@ -21,7 +21,7 @@ struct WorldEditView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             Form {
                 Section("条目") {
                     Picker("分类", selection: $category) {
@@ -32,8 +32,7 @@ struct WorldEditView: View {
                     TextField("名称", text: $name)
                 }
                 Section("内容") {
-                    TextField("设定描述…", text: $content, axis: .vertical)
-                        .lineLimit(6...16)
+                    MultilineField(text: $content, placeholder: "设定描述…", minHeight: 130)
                 }
             }
             .navigationTitle(entry == nil ? "新建条目" : "编辑条目")

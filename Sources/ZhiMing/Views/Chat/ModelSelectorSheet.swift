@@ -2,14 +2,14 @@ import SwiftUI
 
 /// 模型切换（单选列表；仅当前会话生效）
 struct ModelSelectorSheet: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     /// 当前会话选中的提供商；nil = 跟随默认
     @Binding var selection: ProviderConfig?
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             List {
                 if store.providers.isEmpty {
                     Section {
@@ -32,8 +32,8 @@ struct ModelSelectorSheet: View {
                                             .font(.caption2)
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
-                                            .background(.tint.opacity(0.15), in: Capsule())
-                                            .foregroundStyle(.tint)
+                                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                                            .foregroundStyle(Color.accentColor)
                                     }
                                 }
                                 Text(provider.modelName)
@@ -43,7 +43,7 @@ struct ModelSelectorSheet: View {
                             Spacer()
                             if isSelected(provider) {
                                 Image(systemName: "checkmark")
-                                    .foregroundStyle(.tint)
+                                    .foregroundStyle(Color.accentColor)
                             }
                         }
                         .contentShape(Rectangle())
@@ -59,7 +59,6 @@ struct ModelSelectorSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
     }
 
     private func isSelected(_ provider: ProviderConfig) -> Bool {

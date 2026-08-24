@@ -2,19 +2,20 @@ import SwiftUI
 
 /// 首页：作品卡片列表（对标 Kelivo 会话列表卡片行）
 struct NovelListView: View {
-    @Environment(AppStore.self) private var store
-    @State private var path: [UUID] = []
+    @EnvironmentObject private var store: AppStore
     @State private var showCreate = false
     @State private var renamingNovel: Novel?
     @State private var renameText = ""
     @State private var deletingNovel: Novel?
+    /// 创建后自动进入作品（iOS 15 用隐藏 NavigationLink 实现）
+    @State private var autoOpenNovel: Novel?
 
     private var sortedNovels: [Novel] {
         store.novels.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        CompatNavigationView {
             List {
                 if store.novels.isEmpty {
                     Section {
@@ -29,7 +30,7 @@ struct NovelListView: View {
                     }
                 }
                 ForEach(sortedNovels) { novel in
-                    NavigationLink(value: novel.id) {
+                    NavigationLink(destination: NovelDetailView(novel: novel)) {
                         NovelCardRow(novel: novel)
                     }
                     .buttonStyle(.plain)
@@ -50,17 +51,11 @@ struct NovelListView: View {
             }
             .listStyle(.plain)
             .navigationTitle("织命")
-            .navigationDestination(for: UUID.self) { id in
-                if let novel = store.novels.first(where: { $0.id == id }) {
-                    NovelDetailView(novel: novel)
-                }
-            }
+            .background(autoOpenLink)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: AppTheme.spacing[2]) {
-                        NavigationLink {
-                            SettingsView()
-                        } label: {
+                        NavigationLink(destination: SettingsView()) {
                             Image(systemName: "gearshape")
                         }
                         Button {
@@ -74,23 +69,22 @@ struct NovelListView: View {
             .sheet(isPresented: $showCreate) {
                 NovelCreateSheet { createdID in
                     showCreate = false
-                    path.append(createdID)
+                    autoOpenNovel = store.novels.first(where: { $0.id == createdID })
                 }
             }
-            .alert("重命名作品", isPresented: Binding(
+            .sheet(isPresented: Binding(
                 get: { renamingNovel != nil },
                 set: { if !$0 { renamingNovel = nil } }
             )) {
-                TextField("书名", text: $renameText)
-                Button("取消", role: .cancel) { renamingNovel = nil }
-                Button("保存") {
+                RenameSheet(
+                    title: "重命名作品",
+                    placeholder: "书名",
+                    initialText: renameText
+                ) { newValue in
                     if let novel = renamingNovel {
-                        let trimmed = renameText.trimmingCharacters(in: .whitespaces)
-                        if !trimmed.isEmpty {
-                            novel.title = trimmed
-                            novel.updatedAt = .now
-                            store.save()
-                        }
+                        novel.title = newValue
+                        novel.updatedAt = .now
+                        store.save()
                     }
                     renamingNovel = nil
                 }
@@ -113,11 +107,27 @@ struct NovelListView: View {
             }
         }
     }
+
+    /// 创建作品后自动推入详情（iOS 15 隐藏链接方案）
+    private var autoOpenLink: some View {
+        Group {
+            if let novel = autoOpenNovel {
+                NavigationLink(
+                    destination: NovelDetailView(novel: novel),
+                    isActive: Binding(
+                        get: { autoOpenNovel != nil },
+                        set: { if !$0 { autoOpenNovel = nil } }
+                    )
+                ) { EmptyView() }
+                .hidden()
+            }
+        }
+    }
 }
 
 /// 卡片行：圆形色块（作品色）+ 标题 + 副标题 + 相对时间
 private struct NovelCardRow: View {
-    let novel: Novel
+    @ObservedObject var novel: Novel
 
     private var subtitle: String {
         if let last = latestChapterTitle {

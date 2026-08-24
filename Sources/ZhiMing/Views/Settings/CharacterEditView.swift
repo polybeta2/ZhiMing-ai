@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 角色卡编辑：基础档案 + 当前状态区 + 参与近期剧情开关 + 别名列表
 struct CharacterEditView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     let novel: Novel
@@ -38,22 +38,22 @@ struct CharacterEditView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             Form {
                 Section("基础档案") {
                     TextField("姓名", text: $name)
                     aliasesEditor
-                    multiLine("外貌", text: $appearance)
-                    multiLine("性格", text: $personality)
-                    multiLine("背景", text: $background)
+                    MultilineField(text: $appearance, placeholder: "外貌", minHeight: 48)
+                    MultilineField(text: $personality, placeholder: "性格", minHeight: 48)
+                    MultilineField(text: $background, placeholder: "背景", minHeight: 48)
                 }
 
                 Section {
-                    multiLine("当前目标", text: $currentGoal)
-                    multiLine("当前位置", text: $currentLocation)
-                    multiLine("身体状态", text: $physicalState)
-                    multiLine("心理状态", text: $mentalState)
-                    multiLine("最近出场章节", text: $lastSeenChapterTitle)
+                    MultilineField(text: $currentGoal, placeholder: "当前目标", minHeight: 44)
+                    MultilineField(text: $currentLocation, placeholder: "当前位置", minHeight: 44)
+                    MultilineField(text: $physicalState, placeholder: "身体状态", minHeight: 44)
+                    MultilineField(text: $mentalState, placeholder: "心理状态", minHeight: 44)
+                    MultilineField(text: $lastSeenChapterTitle, placeholder: "最近出场章节", minHeight: 44)
                 } header: {
                     Text("当前状态")
                 } footer: {
@@ -110,11 +110,6 @@ struct CharacterEditView: View {
         guard !value.isEmpty, !aliases.contains(value) else { return }
         aliases.append(value)
         newAlias = ""
-    }
-
-    private func multiLine(_ label: String, text: Binding<String>) -> some View {
-        TextField(label, text: text, axis: .vertical)
-            .lineLimit(1...4)
     }
 
     private func save() {

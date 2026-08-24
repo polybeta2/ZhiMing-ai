@@ -53,7 +53,10 @@ final class OpenAICompatibleClient: LLMClient {
     }
 
     private func makeRequest(messages: [LLMMessage], config: GenerationConfig) throws -> URLRequest {
-        let url = baseUrl.appending(path: "chat/completions")
+        // iOS 15 兼容：不用 URL.appending(path:)（iOS 16+），手动拼接并处理斜杠
+        let base = baseUrl.absoluteString
+        let urlString = base.hasSuffix("/") ? base + "chat/completions" : base + "/chat/completions"
+        guard let url = URL(string: urlString) else { throw LLMError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 120

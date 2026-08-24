@@ -3,9 +3,9 @@ import SwiftUI
 /// 通用聊天页（立项与写作助手共用）
 /// 能力：消息持久化到 ChatThread、流式气泡、停止、重发最后一条、会话内切换模型
 struct ChatView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     let novel: Novel
-    let thread: ChatThread
+    @ObservedObject var thread: ChatThread
 
     @State private var input = ""
     @State private var isStreaming = false
@@ -13,7 +13,7 @@ struct ChatView: View {
     @State private var streamTask: Task<Void, Never>?
     @State private var showModelSelector = false
     @State private var sessionProvider: ProviderConfig?
-    @State private var creation = CreationSessionViewModel()
+    @StateObject private var creation = CreationSessionViewModel()
     @State private var lastCreationWasRevise = false
     @State private var writingError: String?
     @State private var appeared = false
@@ -54,7 +54,7 @@ struct ChatView: View {
         .navigationTitle(isCreation ? "立项助手" : "写作助手")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: AppTheme.spacing[2]) {
                     Button {
                         resendLastUserMessage()
@@ -71,7 +71,7 @@ struct ChatView: View {
                             Text(currentModelName)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                                .frame(maxWidth: 90)
+                                .frame(width: 90)
                         }
                         .font(.caption)
                     }
@@ -121,27 +121,29 @@ struct ChatView: View {
                 }
                 .padding(AppTheme.spacing[2])
             }
-            .onChange(of: thread.messages.count) { _, _ in
+            .zmOnChange(of: thread.messages.count) { _ in
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            .onChange(of: streamingText) { _, _ in
+            .zmOnChange(of: streamingText) { _ in
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
-            .onChange(of: creation.phase) { _, _ in
+            .zmOnChange(of: creation.phase) { _ in
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
         }
     }
 
     private var emptyHint: some View {
-        ContentUnavailableView(
-            isCreation ? "立项对话" : "写作助手",
-            systemImage: isCreation ? "wand.and.stars" : "bubble.left.and.bubble.right",
-            description: Text(isCreation
-                              ? "输入一句话创意，AI 生成可编辑的作品蓝图"
-                              : "就这部作品向助手提问：剧情走向、人物动机、写作技法…")
-        )
-        .padding(.top, AppTheme.spacing[3])
+        ScrollView {
+            EmptyStateView(
+                title: isCreation ? "立项对话" : "写作助手",
+                systemImage: isCreation ? "wand.and.stars" : "bubble.left.and.bubble.right",
+                description: isCreation
+                    ? "输入一句话创意，AI 生成可编辑的作品蓝图"
+                    : "就这部作品向助手提问：剧情走向、人物动机、写作技法…"
+            )
+            .padding(.top, AppTheme.spacing[4])
+        }
     }
 
     private var creationActions: some View {
@@ -209,25 +211,24 @@ struct ChatView: View {
         if creation.phase == .revising {
             // 已有蓝图：作为修订意见
             lastCreationWasRevise = true
-            isStreaming = true
-            streamingText = ""
-            creation.onStreamSettled = { [self] raw, parsed in
-                settleCreation(raw: raw, parsed: parsed)
-            }
+            beginCreationStream()
             creation.revise(feedback: text, provider: provider)
-            observeCreationStream()
         } else {
             // 无蓝图：作为创意生成蓝图（「重新生成」回退到最初创意）
             let brief = (text.contains("重新生成") && !novel.synopsis.isEmpty) ? novel.synopsis : text
             lastCreationWasRevise = false
-            isStreaming = true
-            streamingText = ""
-            creation.onStreamSettled = { [self] raw, parsed in
-                settleCreation(raw: raw, parsed: parsed)
-            }
+            beginCreationStream()
             creation.generateBlueprint(brief: brief, provider: provider)
-            observeCreationStream()
         }
+    }
+
+    private func beginCreationStream() {
+        isStreaming = true
+        streamingText = ""
+        creation.onStreamSettled = { raw, parsed in
+            settleCreation(raw: raw, parsed: parsed)
+        }
+        observeCreationStream()
     }
 
     /// 把 VM 的 draft 镜像到气泡
@@ -236,7 +237,7 @@ struct ChatView: View {
         streamTask = Task { @MainActor in
             while isStreaming {
                 streamingText = creation.draft
-                try? await Task.sleep(for: .milliseconds(80))
+                try? await Task.sleep(nanoseconds: 80_000_000)
             }
         }
     }
@@ -288,7 +289,7 @@ struct ChatView: View {
 
         isStreaming = true
         streamingText = ""
-        KeepAwake.set(true)   // 生成中保持屏幕常亮
+        KeepAwake.set(true)
         streamTask?.cancel()
         streamTask = Task { @MainActor in
             var raw = ""

@@ -3,8 +3,8 @@ import SwiftUI
 /// 版本历史与回退（对标司命版本历史）
 /// 行：版本号 + 触发类型徽标（手动/AI/回退）+ 时间 + 字数；点击预览，确认后回退
 struct SnapshotListView: View {
-    @Environment(AppStore.self) private var store
-    let chapter: Chapter
+    @EnvironmentObject private var store: AppStore
+    @ObservedObject var chapter: Chapter
 
     @State private var previewing: ChapterSnapshot?
     @State private var restoring: ChapterSnapshot?
@@ -34,7 +34,7 @@ struct SnapshotListView: View {
         .navigationTitle("版本历史")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     SnapshotService.snapshot(chapter, trigger: "manual_save")
                     store.save()
@@ -109,7 +109,7 @@ private struct SnapshotRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(color.opacity(0.15), in: Capsule())
-            .foregroundStyle(color)
+            .foregroundColor(color)
     }
 }
 
@@ -119,7 +119,7 @@ private struct SnapshotPreviewSheet: View {
     var onRestore: () -> Void
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             ScrollView {
                 Text(snapshot.content.isEmpty ? "（该版本无正文）" : snapshot.content)
                     .frame(maxWidth: .infinity, alignment: .leading)

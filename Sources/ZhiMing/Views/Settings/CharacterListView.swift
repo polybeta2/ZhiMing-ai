@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 角色卡列表（含「当前状态列」，借鉴司命 characters 表）
 struct CharacterListView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     let novel: Novel
     @State private var editing: CharacterCard?
     @State private var showNew = false
@@ -35,7 +35,7 @@ struct CharacterListView: View {
         }
         .navigationTitle("角色卡")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showNew = true } label: { Image(systemName: "plus") }
             }
         }
@@ -63,18 +63,18 @@ struct CharacterListView: View {
 }
 
 private struct CharacterRow: View {
-    let character: CharacterCard
+    @ObservedObject var character: CharacterCard
 
     var body: some View {
         HStack(spacing: AppTheme.spacing[2]) {
-            Circle()
-                .fill(.tint.opacity(0.18))
-                .frame(width: 40, height: 40)
-                .overlay {
-                    Text(String(character.name.prefix(1)))
-                        .font(.headline)
-                        .foregroundStyle(.tint)
-                }
+            ZStack(alignment: .center) {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.18))
+                    .frame(width: 40, height: 40)
+                Text(String(character.name.prefix(1)))
+                    .font(.headline)
+                    .foregroundStyle(Color.accentColor)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(character.name).font(.headline)

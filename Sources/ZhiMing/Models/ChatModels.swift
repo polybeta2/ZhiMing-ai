@@ -1,14 +1,13 @@
 import Foundation
-import Observation
+import Combine
 
-@Observable
-final class ChatThread: Identifiable, Codable {
+final class ChatThread: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var purpose: String                  // creation（立项）/ writing（写作助手）
-    var createdAt: Date
-    @ObservationIgnored weak var novel: Novel?
+    @Published var purpose: String                  // creation（立项）/ writing（写作助手）
+    @Published var createdAt: Date
+    weak var novel: Novel?
 
-    var messages: [ChatMessage] = []
+    @Published var messages: [ChatMessage] = []
 
     init(id: UUID = UUID(), purpose: String) {
         self.id = id
@@ -18,7 +17,7 @@ final class ChatThread: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey { case id, purpose, createdAt, messages }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         purpose = try c.decode(String.self, forKey: .purpose)
@@ -35,13 +34,12 @@ final class ChatThread: Identifiable, Codable {
     }
 }
 
-@Observable
-final class ChatMessage: Identifiable, Codable {
+final class ChatMessage: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var role: String                     // user / assistant
-    var content: String
-    var createdAt: Date
-    @ObservationIgnored weak var thread: ChatThread?
+    @Published var role: String                     // user / assistant
+    @Published var content: String
+    @Published var createdAt: Date
+    weak var thread: ChatThread?
 
     init(id: UUID = UUID(), role: String, content: String) {
         self.id = id
@@ -52,7 +50,7 @@ final class ChatMessage: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey { case id, role, content, createdAt }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         role = try c.decode(String.self, forKey: .role)

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 提供商新增/编辑表单；「测试连接」调用 testConnection() 展示成功文案或具体错误
 struct ProviderEditView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     let provider: ProviderConfig?          // nil = 新建
@@ -44,7 +44,7 @@ struct ProviderEditView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             Form {
                 Section("快捷填充") {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -62,13 +62,13 @@ struct ProviderEditView: View {
                     TextField("Base URL（如 https://api.deepseek.com/v1）", text: $baseUrl)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .disableAutocorrection(true)
                     SecureField(apiKeyPlaceholder, text: $apiKey)
                         .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .disableAutocorrection(true)
                     TextField("模型名（如 deepseek-chat）", text: $modelName)
                         .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .disableAutocorrection(true)
                 }
 
                 Section("生成参数") {
@@ -77,7 +77,7 @@ struct ProviderEditView: View {
                         Slider(value: $temperature, in: 0...2, step: 0.1)
                         Text(String(format: "%.1f", temperature))
                             .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(.secondary)
                             .frame(width: 36)
                     }
                     Stepper("输出预留 maxTokens：\(maxTokens)", value: $maxTokens, in: 256...32768, step: 256)
@@ -85,8 +85,7 @@ struct ProviderEditView: View {
                 }
 
                 Section("附加") {
-                    TextField("附加系统指令（可选）", text: $systemPromptExtra, axis: .vertical)
-                        .lineLimit(2...4)
+                    MultilineField(text: $systemPromptExtra, placeholder: "附加系统指令（可选）", minHeight: 56)
                     Toggle("设为默认提供商", isOn: $isDefault)
                 }
 
@@ -104,11 +103,11 @@ struct ProviderEditView: View {
                     switch testState {
                     case .success(let text):
                         Label("连接成功：\(text)", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Color.green)
                             .font(.footnote)
                     case .failure(let message):
                         Label(message, systemImage: "xmark.octagon.fill")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Color.red)
                             .font(.footnote)
                     default:
                         EmptyView()
@@ -162,10 +161,10 @@ struct ProviderEditView: View {
                 .font(.subheadline)
                 .padding(.horizontal, AppTheme.spacing[2])
                 .padding(.vertical, AppTheme.spacing[1])
-                .background(.tint.opacity(0.12), in: Capsule())
+                .background(Color.accentColor.opacity(0.12), in: Capsule())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.tint)
+        .foregroundColor(.accentColor)
     }
 
     /// 以当前表单值构造临时客户端（未保存的 Key 也能测试）

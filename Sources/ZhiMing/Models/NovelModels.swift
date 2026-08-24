@@ -1,26 +1,26 @@
 import Foundation
-import Observation
+import Combine
 
 // 说明：本工具链（Windows/WSL + xtool 交叉编译）无法使用 SwiftData 的闭源宏
-// （xtool-org/xtool#149 已确认）。持久层改为「@Observable 模型 + JSON 文档存储」，
+// （xtool-org/xtool#149 已确认）。持久层改为「ObservableObject 模型 + JSON 文档存储」，
 // 实体字段、关系与级联语义与实施计划第四节保持一致；删除作品即整体移除子树，天然级联。
+// iOS 15 兼容：Observation(@Observable) 为 iOS 17+，此处统一用 Combine 的 ObservableObject。
 
-@Observable
-final class Novel: Identifiable, Codable {
+final class Novel: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var title: String
-    var synopsis: String                 // 一句话创意/梗概
-    var genre: String?
-    var perspective: String?             // 叙事视角（第一人称/第三人称…）
-    var styleGuide: String?              // 风格约束（续写时必注入）
-    var accentColorHex: String?
-    var createdAt: Date
-    var updatedAt: Date
+    @Published var title: String
+    @Published var synopsis: String                 // 一句话创意/梗概
+    @Published var genre: String?
+    @Published var perspective: String?             // 叙事视角（第一人称/第三人称…）
+    @Published var styleGuide: String?              // 风格约束（续写时必注入）
+    @Published var accentColorHex: String?
+    @Published var createdAt: Date
+    @Published var updatedAt: Date
 
-    var volumes: [Volume] = []
-    var characters: [CharacterCard] = []
-    var worldEntries: [WorldEntry] = []
-    var chatThreads: [ChatThread] = []
+    @Published var volumes: [Volume] = []
+    @Published var characters: [CharacterCard] = []
+    @Published var worldEntries: [WorldEntry] = []
+    @Published var chatThreads: [ChatThread] = []
 
     init(id: UUID = UUID(), title: String, synopsis: String = "") {
         self.id = id
@@ -38,7 +38,7 @@ final class Novel: Identifiable, Codable {
         case volumes, characters, worldEntries, chatThreads
     }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
@@ -84,15 +84,14 @@ final class Novel: Identifiable, Codable {
     }
 }
 
-@Observable
-final class Volume: Identifiable, Codable {
+final class Volume: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var name: String
-    var outline: String?                 // 卷纲
-    var sortOrder: Int
-    @ObservationIgnored weak var novel: Novel?
+    @Published var name: String
+    @Published var outline: String?                 // 卷纲
+    @Published var sortOrder: Int
+    weak var novel: Novel?
 
-    var chapters: [Chapter] = []
+    @Published var chapters: [Chapter] = []
 
     init(id: UUID = UUID(), name: String, sortOrder: Int, outline: String? = nil) {
         self.id = id
@@ -103,7 +102,7 @@ final class Volume: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey { case id, name, outline, sortOrder, chapters }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
@@ -122,19 +121,18 @@ final class Volume: Identifiable, Codable {
     }
 }
 
-@Observable
-final class Chapter: Identifiable, Codable {
+final class Chapter: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var title: String
-    var detailedOutline: String?         // 本章细纲
-    var content: String                  // 正文
-    var sortOrder: Int
-    var wordCount: Int
-    var updatedAt: Date
-    @ObservationIgnored weak var volume: Volume?
+    @Published var title: String
+    @Published var detailedOutline: String?         // 本章细纲
+    @Published var content: String                  // 正文
+    @Published var sortOrder: Int
+    @Published var wordCount: Int
+    @Published var updatedAt: Date
+    weak var volume: Volume?
 
-    var snapshots: [ChapterSnapshot] = []
-    var summary: ChapterSummary?
+    @Published var snapshots: [ChapterSnapshot] = []
+    @Published var summary: ChapterSummary?
 
     init(id: UUID = UUID(), title: String, sortOrder: Int) {
         self.id = id
@@ -150,7 +148,7 @@ final class Chapter: Identifiable, Codable {
         case snapshots, summary
     }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
@@ -177,12 +175,11 @@ final class Chapter: Identifiable, Codable {
     }
 }
 
-@Observable
-final class ChapterSummary: Identifiable, Codable {
+final class ChapterSummary: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var summaryText: String              // 本章摘要
-    var keyFacts: [String]               // 关键事实（叙事账本简化版）
-    @ObservationIgnored weak var chapter: Chapter?
+    @Published var summaryText: String              // 本章摘要
+    @Published var keyFacts: [String]               // 关键事实（叙事账本简化版）
+    weak var chapter: Chapter?
 
     init(id: UUID = UUID(), summaryText: String, keyFacts: [String] = []) {
         self.id = id
@@ -192,7 +189,7 @@ final class ChapterSummary: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey { case id, summaryText, keyFacts }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         summaryText = try c.decode(String.self, forKey: .summaryText)
@@ -207,14 +204,13 @@ final class ChapterSummary: Identifiable, Codable {
     }
 }
 
-@Observable
-final class ChapterSnapshot: Identifiable, Codable {
+final class ChapterSnapshot: Identifiable, ObservableObject, Codable {
     let id: UUID
-    var versionNumber: Int
-    var content: String
-    var triggerType: String              // manual_save / ai_insert / restore
-    var createdAt: Date
-    @ObservationIgnored weak var chapter: Chapter?
+    @Published var versionNumber: Int
+    @Published var content: String
+    @Published var triggerType: String              // manual_save / ai_insert / restore
+    @Published var createdAt: Date
+    weak var chapter: Chapter?
 
     init(id: UUID = UUID(), versionNumber: Int, content: String, triggerType: String) {
         self.id = id
@@ -226,7 +222,7 @@ final class ChapterSnapshot: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey { case id, versionNumber, content, triggerType, createdAt }
 
-    init(from decoder: Decoder) throws {
+    required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         versionNumber = try c.decode(Int.self, forKey: .versionNumber)

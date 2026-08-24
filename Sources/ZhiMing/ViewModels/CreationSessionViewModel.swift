@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 // MARK: - 蓝图结构（字段与 creationBlueprint 模板一一对应）
 
@@ -54,15 +54,15 @@ struct NovelBlueprint: Codable {
 // MARK: - 立项会话状态机
 
 /// collecting → blueprint(streaming) → revising → confirmed
-@Observable
+/// iOS 15 兼容：ObservableObject + @Published
 @MainActor
-final class CreationSessionViewModel {
+final class CreationSessionViewModel: ObservableObject {
     enum Phase: Equatable { case collecting, streaming, revising, confirmed }
 
-    private(set) var phase: Phase = .collecting
-    var blueprint: NovelBlueprint?
-    private(set) var draft = ""
-    var errorMessage: String?
+    @Published private(set) var phase: Phase = .collecting
+    @Published var blueprint: NovelBlueprint?
+    @Published private(set) var draft = ""
+    @Published var errorMessage: String?
     /// 流结束后回调：(原始输出, 是否解析成功)。取消/失败时也会触发。
     var onStreamSettled: ((_ raw: String, _ parsed: Bool) -> Void)?
     private var streamTask: Task<Void, Never>?
@@ -78,6 +78,7 @@ final class CreationSessionViewModel {
         phase = .streaming
         draft = ""
         errorMessage = nil
+        KeepAwake.set(true)
 
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
@@ -101,6 +102,7 @@ final class CreationSessionViewModel {
         phase = .streaming
         draft = ""
         errorMessage = nil
+        KeepAwake.set(true)
 
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
@@ -198,7 +200,6 @@ final class CreationSessionViewModel {
         config: GenerationConfig
     ) {
         streamTask?.cancel()
-        KeepAwake.set(true)   // 生成中保持屏幕常亮
         streamTask = Task {
             var raw = ""
             do {

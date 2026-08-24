@@ -1,13 +1,13 @@
 import SwiftUI
 import UIKit
 
-/// 章节编辑器：沉浸编辑 + 底部 AI 工具条（续写 / 改写 / 润色）
+/// 章节编辑器：沉浸编辑 + 底部 AI 工具条（续写 / 改写 / 润色 / 摘要 / 版本）
 /// 续写字数快捷选项 800/1500/2500；草稿经 DraftCard 采纳/重新生成/放弃
 struct ChapterEditorView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     let chapter: Chapter
 
-    @State private var vm = WritingSessionViewModel()
+    @StateObject private var vm = WritingSessionViewModel()
     @State private var text: String
     @State private var saveTask: Task<Void, Never>?
     @State private var showContinueSheet = false
@@ -43,14 +43,13 @@ struct ChapterEditorView: View {
                 Spacer()
                 Text("\(text.count) 字")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
             }
             .padding(.horizontal, AppTheme.spacing[3])
             .padding(.vertical, AppTheme.spacing[1])
 
             TextEditor(text: $text)
                 .font(.body)
-                .scrollContentBackground(.hidden)
                 .padding(.horizontal, AppTheme.spacing[2])
 
             if vm.phase != .idle {
@@ -65,10 +64,10 @@ struct ChapterEditorView: View {
             } else {
                 if summaryGenerating {
                     HStack {
-                        ProgressView().controlSize(.small)
+                        ProgressView()
                         Text("正在生成章节摘要…")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(.secondary)
                         Spacer()
                     }
                     .padding(.horizontal, AppTheme.spacing[3])
@@ -77,7 +76,7 @@ struct ChapterEditorView: View {
                 if let summaryError {
                     Label(summaryError, systemImage: "xmark.octagon.fill")
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundColor(.red)
                         .padding(.horizontal, AppTheme.spacing[3])
                 }
                 aiToolbar
@@ -85,9 +84,13 @@ struct ChapterEditorView: View {
         }
         .navigationTitle("编辑")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: text) { _, newValue in
+        .zmOnChange(of: text) { newValue in
             chapter.content = newValue          // 轻量同步正文
             scheduleSave()                      // 防抖保存：字数与落盘不逐键执行
+        }
+        // 快照回退等外部改动同步回编辑器
+        .zmOnChange(of: chapter.content) { newValue in
+            if newValue != text { text = newValue }
         }
         .onDisappear {
             saveTask?.cancel()
@@ -107,7 +110,6 @@ struct ChapterEditorView: View {
         }
         .sheet(isPresented: $showSummarySheet) {
             SummaryEditSheet(chapter: chapter, rawFallback: lastSummaryRaw) {
-                // 重新生成
                 lastSummaryRaw = ""
                 generateSummary()
             }
@@ -118,50 +120,50 @@ struct ChapterEditorView: View {
         } message: {
             Text("请先在「设置 → 模型提供商」中添加并测试一个 OpenAI 兼容接口。")
         }
-        .navigationDestination(isPresented: $showSettings) {
-            SettingsView()
-        }
-        .navigationDestination(isPresented: $showSnapshots) {
-            SnapshotListView(chapter: chapter)
-        }
-        // 快照回退等外部改动同步回编辑器
-        .onChange(of: chapter.content) { _, newValue in
-            if newValue != text { text = newValue }
-        }
+        .background(hiddenLink(destination: SettingsView(), isActive: $showSettings))
+        .background(hiddenLink(destination: SnapshotListView(chapter: chapter), isActive: $showSnapshots))
+    }
+
+    /// iOS 15：隐藏 NavigationLink 替代 navigationDestination(isPresented:)
+    private func hiddenLink<Destination: View>(destination: Destination, isActive: Binding<Bool>) -> some View {
+        NavigationLink(destination: destination, isActive: isActive) { EmptyView() }
+            .hidden()
     }
 
     // MARK: - 工具条
 
     private var aiToolbar: some View {
-        HStack(spacing: 0) {
-            toolButton("续写", icon: "text.badge.plus") {
-                guard ensureProvider() else { return }
-                showContinueSheet = true
-            }
-            toolButton("改写", icon: "text.replace") {
-                guard ensureProvider() else { return }
-                rewritePresetMode = "改写"
-                showRewriteSheet = true
-            }
-            toolButton("润色", icon: "wand.and.stars") {
-                guard ensureProvider() else { return }
-                rewritePresetMode = "润色"
-                showRewriteSheet = true
-            }
-            toolButton(chapter.summary == nil ? "生成摘要" : "摘要", icon: "doc.plaintext") {
-                if chapter.summary != nil {
-                    summaryError = nil
-                    showSummarySheet = true
-                } else {
-                    generateSummary()
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: AppTheme.spacing[1]) {
+                toolButton("续写", icon: "text.badge.plus") {
+                    guard ensureProvider() else { return }
+                    showContinueSheet = true
+                }
+                toolButton("改写", icon: "text.replace") {
+                    guard ensureProvider() else { return }
+                    rewritePresetMode = "改写"
+                    showRewriteSheet = true
+                }
+                toolButton("润色", icon: "wand.and.stars") {
+                    guard ensureProvider() else { return }
+                    rewritePresetMode = "润色"
+                    showRewriteSheet = true
+                }
+                toolButton(chapter.summary == nil ? "生成摘要" : "摘要", icon: "doc.plaintext") {
+                    if chapter.summary != nil {
+                        summaryError = nil
+                        showSummarySheet = true
+                    } else {
+                        generateSummary()
+                    }
+                }
+                toolButton("版本", icon: "clock.arrow.circlepath") {
+                    showSnapshots = true
                 }
             }
-            toolButton("版本", icon: "clock.arrow.circlepath") {
-                showSnapshots = true
-            }
+            .padding(.horizontal, AppTheme.spacing[2])
+            .padding(.vertical, AppTheme.spacing[1])
         }
-        .padding(.horizontal, AppTheme.spacing[2])
-        .padding(.vertical, AppTheme.spacing[1])
         .background(.bar)
     }
 
@@ -169,11 +171,10 @@ struct ChapterEditorView: View {
         Button(action: action) {
             Label(title, systemImage: icon)
                 .font(.subheadline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, AppTheme.spacing[1])
+                .padding(.horizontal, AppTheme.spacing[1])
+                .padding(.vertical, 6)
         }
         .buttonStyle(.bordered)
-        .padding(.horizontal, AppTheme.spacing[0])
     }
 
     private func ensureProvider() -> Bool {
@@ -298,7 +299,7 @@ struct ChapterEditorView: View {
     private func scheduleSave() {
         saveTask?.cancel()
         saveTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(800))
+            try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
             saveNow()
         }
@@ -323,7 +324,7 @@ private struct ContinueWritingSheet: View {
     private let options = [800, 1500, 2500]
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             Form {
                 Section("续写字数") {
                     Picker("目标字数", selection: $wordTarget) {
@@ -334,8 +335,7 @@ private struct ContinueWritingSheet: View {
                     .pickerStyle(.segmented)
                 }
                 Section("附加指令（可选）") {
-                    TextField("例如：本段以对话推进，减少环境描写…", text: $instruction, axis: .vertical)
-                        .lineLimit(2...4)
+                    MultilineField(text: $instruction, placeholder: "例如：本段以对话推进，减少环境描写…", minHeight: 56)
                 }
             }
             .navigationTitle("AI 续写")
@@ -353,7 +353,6 @@ private struct ContinueWritingSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
     }
 }
 
@@ -374,7 +373,7 @@ private struct RewriteSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             Form {
                 Section("操作") {
                     Picker("模式", selection: $mode) {
@@ -385,8 +384,7 @@ private struct RewriteSheet: View {
                     .pickerStyle(.segmented)
                 }
                 Section {
-                    TextField("选中要处理的片段，粘贴到这里…", text: $selection, axis: .vertical)
-                        .lineLimit(6...14)
+                    MultilineField(text: $selection, placeholder: "选中要处理的片段，粘贴到这里…", minHeight: 120)
                     Button {
                         if let copied = UIPasteboard.general.string, !copied.isEmpty {
                             selection = copied
@@ -401,8 +399,7 @@ private struct RewriteSheet: View {
                     Text("在正文中长按选中目标段落并复制，再粘贴到此处。采纳后原文中的该片段将被替换。")
                 }
                 Section("附加要求（可选）") {
-                    TextField("例如：加强动作描写，压缩对话…", text: $instruction, axis: .vertical)
-                        .lineLimit(1...3)
+                    MultilineField(text: $instruction, placeholder: "例如：加强动作描写，压缩对话…", minHeight: 48)
                 }
             }
             .navigationTitle("AI \(mode)")
@@ -421,14 +418,13 @@ private struct RewriteSheet: View {
                 }
             }
         }
-        .presentationDetents([.large])
     }
 }
 
 // MARK: - 摘要编辑页（可手动修改 summaryText 与 keyFacts；解析失败时可粘贴修正）
 
 private struct SummaryEditSheet: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     let chapter: Chapter
     var onRegenerate: () -> Void
@@ -445,11 +441,10 @@ private struct SummaryEditSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             Form {
                 Section("本章摘要") {
-                    TextField("120-200 字，覆盖主要事件与人物动向…", text: $summaryText, axis: .vertical)
-                        .lineLimit(6...16)
+                    MultilineField(text: $summaryText, placeholder: "120-200 字，覆盖主要事件与人物动向…", minHeight: 110)
                 }
                 Section {
                     ForEach(Array(keyFacts.enumerated()), id: \.offset) { index, fact in

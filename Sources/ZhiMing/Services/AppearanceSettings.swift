@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 外观设置：写入 UserDefaults（绝不存放 API Key），经根视图 .tint / .preferredColorScheme 全局生效
 enum AppearanceSettings {
@@ -10,8 +11,10 @@ enum AppearanceSettings {
         set { UserDefaults.standard.set(newValue, forKey: accentKey) }
     }
 
-    static var accentColor: Color {
-        AppTheme.accentPresets[accentIndex % AppTheme.accentPresets.count]
+    static var accentColor: Color { accentColor(for: accentIndex) }
+
+    static func accentColor(for index: Int) -> Color {
+        AppTheme.accentPresets[max(0, index) % AppTheme.accentPresets.count]
     }
 
     static var schemeIndex: Int {

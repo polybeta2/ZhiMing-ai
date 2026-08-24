@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 新建作品：空白建书 / 一句话立项 两个入口
 struct NovelCreateSheet: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     /// 创建成功回调（传入新作品 id，由首页负责跳转）
@@ -24,7 +24,7 @@ struct NovelCreateSheet: View {
     private let perspectiveOptions = ["", "第一人称", "第三人称限知", "第三人称全知", "多视角交替"]
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationView {
             Group {
                 switch mode {
                 case .choose: chooseView
@@ -78,7 +78,7 @@ struct NovelCreateSheet: View {
             HStack(spacing: AppTheme.spacing[2]) {
                 Image(systemName: icon)
                     .font(.title2)
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(Color.accentColor)
                     .frame(width: 36)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.headline)
@@ -104,8 +104,7 @@ struct NovelCreateSheet: View {
         Form {
             Section("基本信息") {
                 TextField("书名", text: $title)
-                TextField("一句话梗概（可选）", text: $synopsis, axis: .vertical)
-                    .lineLimit(1...3)
+                MultilineField(text: $synopsis, placeholder: "一句话梗概（可选）", minHeight: 56)
             }
             Section("叙事") {
                 Picker("叙事视角", selection: $perspective) {
@@ -113,8 +112,7 @@ struct NovelCreateSheet: View {
                         Text(option.isEmpty ? "未指定" : option).tag(option)
                     }
                 }
-                TextField("风格约束（可选，续写时注入）", text: $styleGuide, axis: .vertical)
-                    .lineLimit(2...4)
+                MultilineField(text: $styleGuide, placeholder: "风格约束（可选，续写时注入）", minHeight: 56)
             }
             Section("强调色") {
                 HStack(spacing: AppTheme.spacing[2]) {
@@ -122,13 +120,12 @@ struct NovelCreateSheet: View {
                         Circle()
                             .fill(AppTheme.accentPresets[index])
                             .frame(width: 32, height: 32)
-                            .overlay {
-                                if accentIndex == index {
-                                    Image(systemName: "checkmark")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.white)
-                                }
-                            }
+                            .overlay(
+                                Image(systemName: "checkmark")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.white)
+                                    .opacity(accentIndex == index ? 1 : 0)
+                            )
                             .onTapGesture { accentIndex = index }
                     }
                     Spacer()
@@ -169,10 +166,12 @@ struct NovelCreateSheet: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            TextField("例如：失忆的灯塔看守人收到一封写给自己的讣告…", text: $brief, axis: .vertical)
-                .lineLimit(4...8)
-                .padding(AppTheme.spacing[2])
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: AppTheme.radiusCard))
+            MultilineField(
+                text: $brief,
+                placeholder: "例如：失忆的灯塔看守人收到一封写给自己的讣告…",
+                minHeight: 120
+            )
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: AppTheme.radiusCard))
 
             Button {
                 createFromBrief()

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 世界观条目列表：按 category 分 Section
 struct WorldListView: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     let novel: Novel
     @State private var editing: WorldEntry?
     @State private var showNew = false
@@ -32,17 +32,7 @@ struct WorldListView: View {
                         Button {
                             editing = entry
                         } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(entry.name).font(.headline)
-                                if !entry.content.isEmpty {
-                                    Text(entry.content)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                            }
-                            .padding(.vertical, AppTheme.spacing[0])
-                            .contentShape(Rectangle())
+                            WorldRow(entry: entry)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -58,7 +48,7 @@ struct WorldListView: View {
         }
         .navigationTitle("世界观")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showNew = true } label: { Image(systemName: "plus") }
             }
         }
@@ -82,5 +72,23 @@ struct WorldListView: View {
             }
             Button("取消", role: .cancel) { deleting = nil }
         }
+    }
+}
+
+private struct WorldRow: View {
+    @ObservedObject var entry: WorldEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(entry.name).font(.headline)
+            if !entry.content.isEmpty {
+                Text(entry.content)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, AppTheme.spacing[0])
+        .contentShape(Rectangle())
     }
 }

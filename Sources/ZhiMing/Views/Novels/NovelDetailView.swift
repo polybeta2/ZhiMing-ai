@@ -1,10 +1,9 @@
 import SwiftUI
 
 /// 作品工作台：章节 / 设定 / 助手 三页签
-/// 页签状态由 @State 保持，返回列表再进入同一实例时不丢失
 struct NovelDetailView: View {
-    @Environment(AppStore.self) private var store
-    let novel: Novel
+    @EnvironmentObject private var store: AppStore
+    @ObservedObject var novel: Novel
 
     enum Tab: String, CaseIterable, Identifiable {
         case chapters = "章节"
@@ -32,7 +31,7 @@ struct NovelDetailView: View {
             case .settings:
                 NovelSettingsTab(novel: novel)
             case .assistant:
-                AssistantPane(novel: novel)             // Phase 8 接入完整 ChatView
+                AssistantPane(novel: novel)
             }
         }
         .navigationTitle(novel.title)
@@ -42,54 +41,48 @@ struct NovelDetailView: View {
 
 /// 设定页签：角色卡 / 世界观 / 大纲 入口
 private struct NovelSettingsTab: View {
-    let novel: Novel
+    @ObservedObject var novel: Novel
 
     var body: some View {
         List {
             Section("作品设定") {
-                NavigationLink {
-                    CharacterListView(novel: novel)
-                } label: {
+                NavigationLink(destination: CharacterListView(novel: novel)) {
                     Label {
                         HStack {
                             Text("角色卡")
                             Spacer()
                             Text("\(novel.characters.count)")
-                                .foregroundStyle(.tertiary)
+                                .foregroundColor(.secondary)
                         }
                     } icon: {
                         Image(systemName: "person.2")
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
-                NavigationLink {
-                    WorldListView(novel: novel)
-                } label: {
+                NavigationLink(destination: WorldListView(novel: novel)) {
                     Label {
                         HStack {
                             Text("世界观")
                             Spacer()
                             Text("\(novel.worldEntries.count)")
-                                .foregroundStyle(.tertiary)
+                                .foregroundColor(.secondary)
                         }
                     } icon: {
                         Image(systemName: "globe.asia.australia")
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
-                NavigationLink {
-                    OutlineView(novel: novel)
-                } label: {
+                NavigationLink(destination: OutlineView(novel: novel)) {
                     Label {
                         HStack {
                             Text("大纲")
                             Spacer()
                             Text("\(novel.volumes.count) 卷")
-                                .foregroundStyle(.tertiary)
+                                .foregroundColor(.secondary)
                         }
                     } icon: {
                         Image(systemName: "list.number")
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
             }
@@ -118,7 +111,7 @@ private struct NovelSettingsTab: View {
 
 /// 助手页签：写作助手会话
 private struct AssistantPane: View {
-    @Environment(AppStore.self) private var store
+    @EnvironmentObject private var store: AppStore
     let novel: Novel
     @State private var thread: ChatThread?
 

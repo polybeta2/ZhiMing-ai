@@ -1,17 +1,17 @@
 import Foundation
-import Observation
+import Combine
 
 /// AI 写作会话：流式草稿状态机（续写 / 改写）
-@Observable
+/// iOS 15 兼容：ObservableObject + @Published
 @MainActor
-final class WritingSessionViewModel {
+final class WritingSessionViewModel: ObservableObject {
     enum Phase: Equatable { case idle, streaming, done }
     enum Mode { case continueWriting(wordTarget: Int), rewrite(mode: String, selection: String) }
 
-    private(set) var phase: Phase = .idle
-    private(set) var draft = ""
-    private(set) var truncatedSections: [String] = []
-    var errorMessage: String?
+    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var draft = ""
+    @Published private(set) var truncatedSections: [String] = []
+    @Published var errorMessage: String?
     private var streamTask: Task<Void, Never>?
 
     func start(mode: Mode, chapter: Chapter, novel: Novel, provider: ProviderConfig, instruction: String?) {
@@ -25,6 +25,7 @@ final class WritingSessionViewModel {
         guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
               let baseUrl = URL(string: provider.baseUrl) else {
             phase = .idle
+            KeepAwake.set(false)
             errorMessage = "未配置有效的模型接口或 API Key"
             return
         }

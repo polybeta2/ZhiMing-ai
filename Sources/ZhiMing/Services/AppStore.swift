@@ -1,13 +1,15 @@
 import Foundation
-import Observation
+import Combine
 
 /// 全局数据仓库：承担原计划中 SwiftData ModelContainer/ModelContext 的职责。
 /// JSON 文档原子写入 Application Support，字段与关系语义不变。
+/// iOS 15 兼容：ObservableObject + 手动 objectWillChange 通知。
 @MainActor
-@Observable
-final class AppStore {
-    var novels: [Novel] = []
-    var providers: [ProviderConfig] = []
+final class AppStore: ObservableObject {
+    @Published var novels: [Novel] = []
+    @Published var providers: [ProviderConfig] = []
+    /// 每次保存自增，驱动观察 store 的视图刷新（嵌套模型变更的兜底通知）
+    @Published private(set) var revision = 0
 
     private struct Document: Codable {
         var novels: [Novel]
@@ -39,6 +41,7 @@ final class AppStore {
 
     /// 原子保存；所有写操作完成后调用
     func save() {
+        revision += 1
         let doc = Document(novels: novels, providers: providers)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
