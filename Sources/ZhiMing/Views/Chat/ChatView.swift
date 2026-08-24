@@ -283,6 +283,7 @@ struct ChatView: View {
         if !novel.synopsis.isEmpty { system += "\n作品梗概：\(novel.synopsis)" }
         if let style = novel.styleGuide, !style.isEmpty { system += "\n风格约束：\(style)" }
         messages.append(.init(role: .system, content: system))
+        messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: messages)
         for message in thread.messages.suffix(12) {
             messages.append(.init(role: message.role == "user" ? .user : .assistant, content: message.content))
         }

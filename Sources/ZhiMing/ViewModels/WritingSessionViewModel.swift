@@ -32,20 +32,21 @@ final class WritingSessionViewModel: ObservableObject {
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
 
-        let messages: [LLMMessage]
+        let baseMessages: [LLMMessage]
         switch mode {
         case .continueWriting(let wordTarget):
             let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: provider.contextBudgetChars)
             truncatedSections = context.truncatedSections
-            messages = PromptTemplates.continueWriting(context: context, wordTarget: wordTarget, extra: instruction)
+            baseMessages = PromptTemplates.continueWriting(context: context, wordTarget: wordTarget, extra: instruction)
             // 验收用：控制台可核对上下文是否包含风格约束/细纲/前文摘要
             print("[ContextBuilder] 续写上下文（\(context.rendered.count) 字）：\n\(context.rendered)")
             if !context.truncatedSections.isEmpty {
                 print("[ContextBuilder] 超预算被裁剪：\(context.truncatedSections.joined(separator: "、"))")
             }
         case .rewrite(let rewriteMode, let selection):
-            messages = PromptTemplates.rewrite(mode: rewriteMode, selection: selection, instruction: instruction)
+            baseMessages = PromptTemplates.rewrite(mode: rewriteMode, selection: selection, instruction: instruction)
         }
+        let messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: baseMessages)
 
         streamTask = Task {
             // 流式节流：delta 先进缓冲，约 100ms 刷新一次发布属性，避免逐字重渲染卡顿

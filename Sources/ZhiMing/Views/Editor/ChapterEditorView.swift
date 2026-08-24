@@ -279,7 +279,10 @@ struct ChapterEditorView: View {
         summaryError = nil
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: 0.2, maxTokens: provider.maxTokens)
-        let messages = PromptTemplates.summarize(content: chapter.content, title: chapter.title)
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.summarize(content: chapter.content, title: chapter.title)
+        )
 
         summaryTask?.cancel()
         summaryTask = Task { @MainActor in

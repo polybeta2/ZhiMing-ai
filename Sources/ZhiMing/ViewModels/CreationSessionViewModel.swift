@@ -82,7 +82,10 @@ final class CreationSessionViewModel: ObservableObject {
 
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
-        let messages = PromptTemplates.creationBlueprint(brief: brief)
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.creationBlueprint(brief: brief)
+        )
         stream(messages: messages, client: client, config: config)
     }
 
@@ -106,7 +109,10 @@ final class CreationSessionViewModel: ObservableObject {
 
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
-        let messages = PromptTemplates.creationRevise(blueprintJSON: json, feedback: feedback)
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.creationRevise(blueprintJSON: json, feedback: feedback)
+        )
         stream(messages: messages, client: client, config: config)
     }
 

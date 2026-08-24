@@ -80,4 +80,19 @@ enum PromptTemplates {
         """
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
+
+    /// 把提供商的「附加系统指令」（ProviderConfig.systemPromptExtra）并入消息：
+    /// 首条为 system 时拼接在其后，否则插入为新的首条 system；空/空白指令原样返回。
+    static func applying(providerExtra extra: String?, to messages: [LLMMessage]) -> [LLMMessage] {
+        guard let trimmed = extra?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return messages
+        }
+        var result = messages
+        if let first = result.first, first.role == .system {
+            result[0] = LLMMessage(role: .system, content: first.content + "\n\n" + trimmed)
+        } else {
+            result.insert(.init(role: .system, content: trimmed), at: 0)
+        }
+        return result
+    }
 }
