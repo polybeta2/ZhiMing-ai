@@ -28,6 +28,11 @@ struct MessageBubbleView: View {
         if isStreaming && text.isEmpty {
             typingDots
                 .padding(.vertical, AppTheme.spacing[1])
+        } else if isStreaming {
+            // 性能关键：流式期间渲染纯文本，避免对不断变长的内容反复做 Markdown 解析（O(n²) 卡顿源）
+            Text(text)
+                .foregroundStyle(isUser ? Color.white : Color.primary)
+                .modifier(StreamingCursorModifier(active: true))
         } else if let attributed = try? AttributedString(
             markdown: text,
             options: AttributedString.MarkdownParsingOptions(
@@ -36,11 +41,9 @@ struct MessageBubbleView: View {
         ) {
             Text(attributed)
                 .foregroundStyle(isUser ? Color.white : Color.primary)
-                .modifier(StreamingCursorModifier(active: isStreaming))
         } else {
             Text(text)
                 .foregroundStyle(isUser ? Color.white : Color.primary)
-                .modifier(StreamingCursorModifier(active: isStreaming))
         }
     }
 

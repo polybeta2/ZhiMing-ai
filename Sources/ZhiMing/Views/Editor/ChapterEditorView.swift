@@ -17,6 +17,10 @@ struct ChapterEditorView: View {
     @State private var showSettings = false
     @State private var showSnapshots = false
 
+    // 会话内模型切换（仅当前编辑器生效）
+    @State private var sessionProvider: ProviderConfig?
+    @State private var showModelSelector = false
+
     // 摘要（叙事账本）
     @State private var summaryGenerating = false
     @State private var summaryError: String?
@@ -34,6 +38,9 @@ struct ChapterEditorView: View {
     }
 
     private var novel: Novel? { chapter.volume?.novel }
+
+    /// 会话内选择的模型优先，否则用全局默认提供商
+    private var activeProvider: ProviderConfig? { sessionProvider ?? store.defaultProvider }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -114,6 +121,9 @@ struct ChapterEditorView: View {
                 generateSummary()
             }
         }
+        .sheet(isPresented: $showModelSelector) {
+            ModelSelectorSheet(selection: $sessionProvider)
+        }
         .alert("尚未配置模型提供商", isPresented: $showNoProviderAlert) {
             Button("去设置") { showSettings = true }
             Button("取消", role: .cancel) {}
@@ -135,11 +145,26 @@ struct ChapterEditorView: View {
     private var aiToolbar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: AppTheme.spacing[1]) {
+                // 会话内模型切换（Kelivo 同款胶囊）
+                Button {
+                    showModelSelector = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "cpu")
+                        Text(activeProvider?.modelName ?? "未配置")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 84)
+                    }
+                    .font(.caption)
+                }
+                .buttonStyle(.bordered)
+
                 toolButton("续写", icon: "text.badge.plus") {
                     guard ensureProvider() else { return }
                     showContinueSheet = true
                 }
-                toolButton("改写", icon: "text.replace") {
+                toolButton("改写", icon: "pencil.and.outline") {
                     guard ensureProvider() else { return }
                     rewritePresetMode = "改写"
                     showRewriteSheet = true
@@ -178,7 +203,7 @@ struct ChapterEditorView: View {
     }
 
     private func ensureProvider() -> Bool {
-        if store.defaultProvider == nil {
+        if activeProvider == nil {
             showNoProviderAlert = true
             return false
         }
@@ -188,7 +213,7 @@ struct ChapterEditorView: View {
     // MARK: - 生成流程
 
     private func startContinue(wordTarget: Int, instruction: String?) {
-        guard let provider = store.defaultProvider, let novel else { return }
+        guard let provider = activeProvider, let novel else { return }
         lastContinue = (wordTarget, instruction)
         lastRewrite = nil
         vm.start(
@@ -201,7 +226,7 @@ struct ChapterEditorView: View {
     }
 
     private func startRewrite(mode: String, selection: String, instruction: String?) {
-        guard let provider = store.defaultProvider, let novel else { return }
+        guard let provider = activeProvider, let novel else { return }
         lastRewrite = (mode, selection, instruction)
         lastContinue = nil
         vm.start(
@@ -236,7 +261,7 @@ struct ChapterEditorView: View {
     // MARK: - 摘要（叙事账本简化版）
 
     private func generateSummary() {
-        guard let provider = store.defaultProvider else {
+        guard let provider = activeProvider else {
             showNoProviderAlert = true
             return
         }

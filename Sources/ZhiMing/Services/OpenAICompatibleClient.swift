@@ -52,6 +52,30 @@ final class OpenAICompatibleClient: LLMClient {
         return text
     }
 
+    /// 拉取可用模型列表（OpenAI 兼容 GET /models），供用户选择
+    func fetchModelIDs() async throws -> [String] {
+        // 与 makeRequest 相同的斜杠处理（iOS 15 兼容，不用 appending(path:)）
+        let base = baseUrl.absoluteString
+        let urlString = base.hasSuffix("/") ? base + "models" : base + "/models"
+        guard let url = URL(string: urlString) else { throw LLMError.invalidURL }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw LLMError.invalidURL }
+        guard http.statusCode == 200 else {
+            throw LLMError.httpStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        struct Wrapper: Decodable {
+            struct Item: Decodable { let id: String }
+            let data: [Item]
+        }
+        guard let wrapper = try? JSONDecoder().decode(Wrapper.self, from: data) else {
+            throw LLMError.decoding(String(data: data, encoding: .utf8) ?? "")
+        }
+        return wrapper.data.map(\.id).sorted()
+    }
+
     private func makeRequest(messages: [LLMMessage], config: GenerationConfig) throws -> URLRequest {
         // iOS 15 兼容：不用 URL.appending(path:)（iOS 16+），手动拼接并处理斜杠
         let base = baseUrl.absoluteString

@@ -201,21 +201,29 @@ final class CreationSessionViewModel: ObservableObject {
     ) {
         streamTask?.cancel()
         streamTask = Task {
+            // 流式节流：delta 先进缓冲，约 100ms 刷新一次发布属性，避免逐字重渲染卡顿
             var raw = ""
+            var lastFlush = Date.distantPast
             do {
                 for try await delta in client.streamChat(messages: messages, config: config) {
-                    self.draft += delta
                     raw += delta
+                    let now = Date()
+                    if now.timeIntervalSince(lastFlush) >= 0.1 {
+                        self.draft = raw
+                        lastFlush = now
+                    }
                 }
                 if !Task.isCancelled {
+                    self.draft = raw
                     let parsed = self.finalize(raw)
                     self.onStreamSettled?(raw, parsed)
                 }
             } catch is CancellationError {
                 // 停止：把已生成的部分交给界面保留
-                self.errorMessage = self.draft.isEmpty ? nil : "生成被停止，已保留部分结果"
+                self.draft = raw
+                self.errorMessage = raw.isEmpty ? nil : "生成被停止，已保留部分结果"
                 self.phase = self.blueprint == nil ? .collecting : .revising
-                self.onStreamSettled?(self.draft, false)
+                self.onStreamSettled?(raw, false)
             } catch {
                 if !Task.isCancelled {
                     self.errorMessage = error.localizedDescription

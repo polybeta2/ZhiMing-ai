@@ -48,16 +48,26 @@ final class WritingSessionViewModel: ObservableObject {
         }
 
         streamTask = Task {
+            // 流式节流：delta 先进缓冲，约 100ms 刷新一次发布属性，避免逐字重渲染卡顿
+            var accumulated = ""
+            var lastFlush = Date.distantPast
             do {
                 for try await delta in client.streamChat(messages: messages, config: config) {
-                    self.draft += delta
+                    accumulated += delta
+                    let now = Date()
+                    if now.timeIntervalSince(lastFlush) >= 0.1 {
+                        self.draft = accumulated
+                        lastFlush = now
+                    }
                 }
+                self.draft = accumulated
                 self.phase = .done
             } catch is CancellationError {
-                self.phase = self.draft.isEmpty ? .idle : .done
+                self.draft = accumulated
+                self.phase = accumulated.isEmpty ? .idle : .done
             } catch {
                 self.errorMessage = error.localizedDescription
-                self.phase = self.draft.isEmpty ? .idle : .done
+                self.phase = accumulated.isEmpty ? .idle : .done
             }
             KeepAwake.set(false)
         }

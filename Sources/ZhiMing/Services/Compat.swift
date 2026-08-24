@@ -113,6 +113,61 @@ struct RenameSheet: View {
     }
 }
 
+/// 可直接编辑的数值输入行：数字输入框 + 加减快捷键；输入实时夹紧到范围
+struct NumberFieldRow: View {
+    let label: String
+    @Binding var value: Int
+    var range: ClosedRange<Int>
+    var step: Int
+
+    @State private var text: String = ""
+
+    var body: some View {
+        HStack(spacing: AppTheme.spacing[2]) {
+            Text(label)
+            Spacer()
+            Button {
+                set(value - step)
+            } label: {
+                Image(systemName: "minus.circle")
+                    .font(.title3)
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+
+            TextField("", text: $text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .font(.body.monospacedDigit())
+                .frame(width: 96)
+                .padding(.vertical, 6)
+                .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+                .zmOnChange(of: text) { newValue in
+                    let digits = newValue.filter { $0.isNumber }
+                    if let parsed = Int(digits) {
+                        value = min(max(parsed, range.lowerBound), range.upperBound)
+                    }
+                }
+                .onAppear { text = String(value) }
+
+            Button {
+                set(value + step)
+            } label: {
+                Image(systemName: "plus.circle")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func set(_ target: Int) {
+        let clamped = min(max(target, range.lowerBound), range.upperBound)
+        value = clamped
+        text = String(clamped)
+    }
+}
+
 /// NavigationStack 的 iOS 15 兼容包装：16+ 走 NavigationStack，15 走单栏 NavigationView
 struct CompatNavigationView<Content: View>: View {
     @ViewBuilder let content: () -> Content

@@ -293,11 +293,18 @@ struct ChatView: View {
         streamTask?.cancel()
         streamTask = Task { @MainActor in
             var raw = ""
+            // 流式节流：约 100ms 刷一次 UI，避免逐字重渲染卡顿
+            var lastFlush = Date.distantPast
             do {
                 for try await delta in client.streamChat(messages: messages, config: config) {
-                    streamingText += delta
                     raw += delta
+                    let now = Date()
+                    if now.timeIntervalSince(lastFlush) >= 0.1 {
+                        streamingText = raw
+                        lastFlush = now
+                    }
                 }
+                streamingText = raw
                 if !Task.isCancelled, !raw.isEmpty {
                     appendAssistant(raw)
                 }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 提供商新增/编辑表单；「测试连接」调用 testConnection() 展示成功文案或具体错误
+/// 提供商新增/编辑表单；「测试连接」调用 testConnection()，「获取模型」拉取 /models 列表
 struct ProviderEditView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +21,13 @@ struct ProviderEditView: View {
     @State private var testTask: Task<Void, Never>?
     @State private var showAlert = false
     @State private var alertMessage = ""
+
+    // 模型列表获取（Kelivo 同款）
+    @State private var fetchingModels = false
+    @State private var fetchedModels: [String] = []
+    @State private var showModelPicker = false
+    @State private var fetchError: String?
+    @State private var fetchTask: Task<Void, Never>?
 
     enum TestState: Equatable {
         case idle
@@ -66,9 +73,7 @@ struct ProviderEditView: View {
                     SecureField(apiKeyPlaceholder, text: $apiKey)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
-                    TextField("模型名（如 deepseek-chat）", text: $modelName)
-                        .textInputAutocapitalization(.never)
-                        .disableAutocorrection(true)
+                    modelRow
                 }
 
                 Section("生成参数") {
@@ -80,8 +85,18 @@ struct ProviderEditView: View {
                             .foregroundColor(.secondary)
                             .frame(width: 36)
                     }
-                    Stepper("输出预留 maxTokens：\(maxTokens)", value: $maxTokens, in: 256...32768, step: 256)
-                    Stepper("上下文字符预算：\(contextBudgetChars)", value: $contextBudgetChars, in: 2000...200000, step: 1000)
+                    NumberFieldRow(
+                        label: "输出预留 maxTokens",
+                        value: $maxTokens,
+                        range: 256...1_000_000,
+                        step: 512
+                    )
+                    NumberFieldRow(
+                        label: "上下文字符预算",
+                        value: $contextBudgetChars,
+                        range: 2_000...500_000,
+                        step: 4_000
+                    )
                 }
 
                 Section("附加") {
@@ -120,6 +135,7 @@ struct ProviderEditView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
                         testTask?.cancel()
+                        fetchTask?.cancel()
                         dismiss()
                     }
                 }
@@ -135,12 +151,48 @@ struct ProviderEditView: View {
             } message: {
                 Text(alertMessage)
             }
+            .sheet(isPresented: $showModelPicker) {
+                ModelPickSheet(models: fetchedModels, current: modelName) { selected in
+                    modelName = selected
+                }
+            }
             .onAppear {
                 if let p = provider {
                     hasExistingKey = KeychainHelper.load(account: p.apiKeyID) != nil
                 }
             }
-            .onDisappear { testTask?.cancel() }
+            .onDisappear {
+                testTask?.cancel()
+                fetchTask?.cancel()
+            }
+        }
+    }
+
+    /// 模型名输入 + 「获取模型」按钮
+    private var modelRow: some View {
+        VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+            HStack(spacing: AppTheme.spacing[1]) {
+                TextField("模型名（如 deepseek-chat）", text: $modelName)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                Button {
+                    fetchModels()
+                } label: {
+                    if fetchingModels {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("获取模型", systemImage: "arrow.down.circle")
+                            .font(.footnote)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(fetchingModels)
+            }
+            if let fetchError {
+                Text(fetchError)
+                    .font(.caption2)
+                    .foregroundStyle(Color.orange)
+            }
         }
     }
 
@@ -167,8 +219,8 @@ struct ProviderEditView: View {
         .foregroundColor(.accentColor)
     }
 
-    /// 以当前表单值构造临时客户端（未保存的 Key 也能测试）
-    private func makeTestClient() -> OpenAICompatibleClient? {
+    /// 以当前表单值构造客户端（未保存的 Key 也能测试/取模型）
+    private func makeClient() -> OpenAICompatibleClient? {
         guard let url = URL(string: baseUrl.trimmingCharacters(in: .whitespaces)), url.scheme != nil else { return nil }
         let key: String
         if !apiKey.isEmpty {
@@ -181,9 +233,39 @@ struct ProviderEditView: View {
         return OpenAICompatibleClient(baseUrl: url, apiKey: key, model: modelName.trimmingCharacters(in: .whitespaces))
     }
 
+    // MARK: - 获取模型列表
+
+    private func fetchModels() {
+        fetchTask?.cancel()
+        guard let client = makeClient() else {
+            fetchError = "请先填写有效的 Base URL 与 API Key"
+            return
+        }
+        fetchingModels = true
+        fetchError = nil
+        fetchTask = Task { @MainActor in
+            do {
+                let ids = try await client.fetchModelIDs()
+                if !Task.isCancelled {
+                    if ids.isEmpty {
+                        fetchError = "接口返回了空模型列表"
+                    } else {
+                        fetchedModels = ids
+                        showModelPicker = true
+                    }
+                }
+            } catch is CancellationError {
+                // 忽略
+            } catch {
+                if !Task.isCancelled { fetchError = error.localizedDescription }
+            }
+            if !Task.isCancelled { fetchingModels = false }
+        }
+    }
+
     private func runConnectionTest() {
         testTask?.cancel()
-        guard let client = makeTestClient() else {
+        guard let client = makeClient() else {
             testState = .failure("请先填写有效的 Base URL、模型名与 API Key")
             return
         }
@@ -204,8 +286,8 @@ struct ProviderEditView: View {
         target.baseUrl = baseUrl.trimmingCharacters(in: .whitespaces)
         target.modelName = modelName.trimmingCharacters(in: .whitespaces)
         target.temperature = temperature
-        target.maxTokens = maxTokens
-        target.contextBudgetChars = contextBudgetChars
+        target.maxTokens = min(max(maxTokens, 256), 1_000_000)
+        target.contextBudgetChars = min(max(contextBudgetChars, 2_000), 500_000)
         let extra = systemPromptExtra.trimmingCharacters(in: .whitespacesAndNewlines)
         target.systemPromptExtra = extra.isEmpty ? nil : extra
         target.isDefault = isDefault
@@ -224,5 +306,61 @@ struct ProviderEditView: View {
         }
         store.save()
         dismiss()
+    }
+}
+
+/// 可用模型选择列表（带搜索过滤）
+private struct ModelPickSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let models: [String]
+    let current: String
+    let onSelect: (String) -> Void
+
+    @State private var query = ""
+
+    private var filtered: [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return models }
+        return models.filter { $0.localizedCaseInsensitiveContains(trimmed) }
+    }
+
+    var body: some View {
+        CompatNavigationView {
+            List {
+                if filtered.isEmpty {
+                    Text("没有匹配的模型")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(filtered, id: \.self) { id in
+                    Button {
+                        onSelect(id)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text(id)
+                                .font(.subheadline.monospacedDigit())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            if id == current {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .searchable(text: $query, prompt: "搜索模型名…")
+            .navigationTitle("可用模型（\(models.count)）")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
     }
 }
