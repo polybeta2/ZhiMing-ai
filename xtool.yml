@@ -1,0 +1,4 @@
+version: 1
+bundleID: com.zhiming.app
+infoPath: ZhiMing-Info.plist
+iconPath: Resources/AppIcon.png

@@ -1,0 +1,69 @@
+import SwiftUI
+
+/// 模型切换（单选列表；仅当前会话生效）
+struct ModelSelectorSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    /// 当前会话选中的提供商；nil = 跟随默认
+    @Binding var selection: ProviderConfig?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if store.providers.isEmpty {
+                    Section {
+                        Text("还没有配置模型提供商，请先到「设置 → 模型提供商」添加。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(store.providers) { provider in
+                    Button {
+                        selection = provider
+                        dismiss()
+                    } label: {
+                        HStack(spacing: AppTheme.spacing[2]) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(provider.name).font(.subheadline.weight(.medium))
+                                    if provider.isDefault {
+                                        Text("默认")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(.tint.opacity(0.15), in: Capsule())
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
+                                Text(provider.modelName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if isSelected(provider) {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .navigationTitle("切换模型")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func isSelected(_ provider: ProviderConfig) -> Bool {
+        if let selection { return selection.id == provider.id }
+        return provider.id == store.defaultProvider?.id
+    }
+}

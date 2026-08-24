@@ -1,0 +1,17 @@
+# ---- Swift / SwiftPM ----
+.DS_Store
+/.build
+/Packages
+.swiftpm/
+xcuserdata/
+DerivedData/
+
+# ---- xtool 构建产物 ----
+xtool/
+*.ipa
+
+# ---- 系统 / 编辑器 ----
+Thumbs.db
+*.swp
+.idea/
+.vscode/
