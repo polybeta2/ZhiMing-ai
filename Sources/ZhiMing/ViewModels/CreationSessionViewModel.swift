@@ -69,7 +69,7 @@ final class CreationSessionViewModel: ObservableObject {
 
     // MARK: 生成蓝图
 
-    func generateBlueprint(brief: String, provider: ProviderConfig) {
+    func generateBlueprint(brief: String, provider: ProviderConfig, supplement: String? = nil) {
         guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
               let baseUrl = URL(string: provider.baseUrl) else {
             errorMessage = "未配置有效的模型接口或 API Key"
@@ -84,7 +84,7 @@ final class CreationSessionViewModel: ObservableObject {
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
         let messages = PromptTemplates.applying(
             providerExtra: provider.systemPromptExtra,
-            to: PromptTemplates.creationBlueprint(brief: brief)
+            to: PromptTemplates.creationBlueprint(brief: brief, supplement: supplement)
         )
         stream(messages: messages, client: client, config: config)
     }

@@ -36,6 +36,19 @@ struct NovelDetailView: View {
         }
         .navigationTitle(novel.title)
         .navigationBarTitleDisplayMode(.inline)
+        // 一句话立项未完成时直接落到助手页签（立项对话）
+        .onAppear {
+            if novel.hasPendingCreationThread { tab = .assistant }
+        }
+    }
+}
+
+extension Novel {
+    /// 存在立项会话且蓝图尚未确认（卷与角色仍为空）→ 视为立项进行中
+    var hasPendingCreationThread: Bool {
+        chatThreads.contains { $0.purpose == "creation" }
+            && volumes.isEmpty
+            && characters.isEmpty
     }
 }
 
@@ -109,7 +122,7 @@ private struct NovelSettingsTab: View {
     }
 }
 
-/// 助手页签：写作助手会话
+/// 助手页签：立项对话优先（未完成时），否则写作助手会话
 private struct AssistantPane: View {
     @EnvironmentObject private var store: AppStore
     let novel: Novel
@@ -125,6 +138,12 @@ private struct AssistantPane: View {
         }
         .onAppear {
             guard thread == nil else { return }
+            // 立项进行中 → 打开立项会话（创意输入已预填 novel.synopsis）
+            if novel.hasPendingCreationThread,
+               let creation = novel.chatThreads.first(where: { $0.purpose == "creation" }) {
+                thread = creation
+                return
+            }
             if let existing = novel.chatThreads.first(where: { $0.purpose == "writing" }) {
                 thread = existing
             } else {

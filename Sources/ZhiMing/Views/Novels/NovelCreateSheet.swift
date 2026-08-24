@@ -20,6 +20,10 @@ struct NovelCreateSheet: View {
 
     // 一句话立项
     @State private var brief = ""
+    /// 已启用的示例标签 id（保存到作品，生成蓝图时按关键词命中注入）
+    @State private var selectedTagIDs: Set<String> = []
+    @State private var previewTag: PromptTag?
+    @ObservedObject private var library = PromptLibrary.shared
 
     private let perspectiveOptions = ["", "第一人称", "第三人称限知", "第三人称全知", "多视角交替"]
 
@@ -160,7 +164,7 @@ struct NovelCreateSheet: View {
     // MARK: - 一句话立项
 
     private var oneLineView: some View {
-        VStack(spacing: AppTheme.spacing[3]) {
+        VStack(spacing: AppTheme.spacing[2]) {
             Text("用一句话描述你的故事创意，AI 将生成可编辑的作品蓝图。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -169,9 +173,11 @@ struct NovelCreateSheet: View {
             MultilineField(
                 text: $brief,
                 placeholder: "例如：失忆的灯塔看守人收到一封写给自己的讣告…",
-                minHeight: 120
+                minHeight: 96
             )
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: AppTheme.radiusCard))
+
+            tagLibrarySection
 
             Button {
                 createFromBrief()
@@ -182,10 +188,63 @@ struct NovelCreateSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            Spacer()
         }
         .padding(AppTheme.spacing[3])
+        .sheet(item: $previewTag) { tag in
+            TagPreviewSheet(
+                tag: tag,
+                isEnabled: Binding(
+                    get: { selectedTagIDs.contains(tag.id) },
+                    set: { if $0 { selectedTagIDs.insert(tag.id) } else { selectedTagIDs.remove(tag.id) } }
+                )
+            )
+        }
+    }
+
+    // MARK: 示例标签库（点击预览 → 开关启用）
+
+    private var tagLibrarySection: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: AppTheme.spacing[2]) {
+                ForEach(library.tagCategories) { category in
+                    Text(category.name)
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: AppTheme.spacing[1]) {
+                            ForEach(category.tags) { tag in
+                                tagChip(tag)
+                            }
+                        }
+                    }
+                }
+                Text("点击标签预览完整内容；打开「启用」后，只有当你的创意中包含该标签的关键词时才会注入对应指导。未启用的标签永不注入。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxHeight: 210)
+    }
+
+    private func tagChip(_ tag: PromptTag) -> some View {
+        let selected = selectedTagIDs.contains(tag.id)
+        return Button {
+            previewTag = tag
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.caption2)
+                Text(tag.name).font(.footnote)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .background(
+                selected ? Color.accentColor : Color(uiColor: .secondarySystemFill),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func createFromBrief() {
@@ -195,6 +254,7 @@ struct NovelCreateSheet: View {
         let displayTitle = text.count <= 14 ? text : String(text.prefix(14)) + "…"
         let novel = Novel(title: displayTitle, synopsis: text)
         novel.accentColorHex = AppTheme.accentPresets[0].hexString
+        novel.enabledTagIDs = Array(selectedTagIDs)   // 智能注入依据（ChatView 生成蓝图时读取）
 
         // 立项会话线程（Phase 8 状态机将读取 synopsis 作为初始创意）
         let thread = ChatThread(purpose: "creation")
@@ -204,5 +264,47 @@ struct NovelCreateSheet: View {
         store.novels.append(novel)
         store.save()
         onCreated(novel.id)
+    }
+}
+
+/// 标签预览：完整预设内容 + 启用开关
+private struct TagPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let tag: PromptTag
+    @Binding var isEnabled: Bool
+
+    var body: some View {
+        CompatNavigationView {
+            Form {
+                Section("标签") {
+                    Toggle(isOn: $isEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tag.name).font(.headline)
+                            Text(isEnabled ? "已启用（命中关键词时注入）" : "未启用")
+                                .font(.caption)
+                                .foregroundStyle(isEnabled ? Color.accentColor : .secondary)
+                        }
+                    }
+                    Text("触发关键词：" + tag.keywords.joined(separator: "、"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("预设提示词内容") {
+                    ScrollView {
+                        Text(tag.presetText)
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(minHeight: 200)
+                }
+            }
+            .navigationTitle("提示词预览")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
     }
 }

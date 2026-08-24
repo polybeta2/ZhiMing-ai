@@ -3,6 +3,9 @@ import SwiftUI
 /// 设置页：Kelivo 风格分组卡片（模型与服务 / 外观 / 关于）
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
+    /// 开发者功能：强提醒确认后才放行（iOS 15 隐藏链接跳转）
+    @State private var showDevWarning = false
+    @State private var devUnlocked = false
 
     var body: some View {
         List {
@@ -48,6 +51,24 @@ struct SettingsView: View {
                 }
             }
 
+            Section("开发者功能") {
+                Button {
+                    showDevWarning = true
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("开发者功能")
+                            Text("内置提示词编辑与示例标签库管理")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+            }
+
             Section("关于") {
                 VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
                     HStack(spacing: AppTheme.spacing[2]) {
@@ -81,5 +102,28 @@ struct SettingsView: View {
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
+        .background(devUnlockLink)
+        .alert("开发者功能", isPresented: $showDevWarning) {
+            Button("我已知晓风险，继续") { devUnlocked = true }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("除非您具备清晰的提示词编写经验，否则请勿擅自修改此处内容，错误改动可能导致生成效果严重下降。")
+        }
+    }
+
+    /// 确认后推入开发者面板（iOS 15 隐藏 NavigationLink 方案）
+    private var devUnlockLink: some View {
+        Group {
+            if devUnlocked {
+                NavigationLink(
+                    destination: DeveloperPanelView(),
+                    isActive: Binding(
+                        get: { devUnlocked },
+                        set: { if !$0 { devUnlocked = false } }
+                    )
+                ) { EmptyView() }
+                .hidden()
+            }
+        }
     }
 }

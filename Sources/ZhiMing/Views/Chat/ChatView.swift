@@ -216,9 +216,11 @@ struct ChatView: View {
         } else {
             // 无蓝图：作为创意生成蓝图（「重新生成」回退到最初创意）
             let brief = (text.contains("重新生成") && !novel.synopsis.isEmpty) ? novel.synopsis : text
+            // 智能注入：仅「已启用标签」且输入命中其关键词时，才附加预设内容
+            let supplement = PromptLibrary.shared.matchedSupplement(enabledIDs: novel.enabledTagIDs, input: brief)
             lastCreationWasRevise = false
             beginCreationStream()
-            creation.generateBlueprint(brief: brief, provider: provider)
+            creation.generateBlueprint(brief: brief, provider: provider, supplement: supplement)
         }
     }
 
@@ -279,9 +281,11 @@ struct ChatView: View {
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
 
         var messages: [LLMMessage] = []
-        var system = "你是小说《\(novel.title)》的写作助手，帮助作者头脑风暴、解答剧情与技法问题，回答简洁具体。"
-        if !novel.synopsis.isEmpty { system += "\n作品梗概：\(novel.synopsis)" }
-        if let style = novel.styleGuide, !style.isEmpty { system += "\n风格约束：\(style)" }
+        let system = PromptTemplates.writingAssistantSystem(
+            title: novel.title,
+            synopsis: novel.synopsis,
+            styleGuide: novel.styleGuide
+        )
         messages.append(.init(role: .system, content: system))
         messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: messages)
         for message in thread.messages.suffix(12) {

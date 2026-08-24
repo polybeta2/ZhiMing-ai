@@ -1,0 +1,298 @@
+import Foundation
+import Combine
+
+// MARK: - 示例标签数据模型（一句话立项增强）
+
+/// 单个示例标签：用户「启用」且输入命中关键词时，presetText 注入蓝图生成的系统提示词
+struct PromptTag: Codable, Identifiable, Equatable {
+    var id: String
+    var name: String
+    var keywords: [String]      // 触发注入的关键词（含标签名本身）
+    var presetText: String      // 完整预设提示词内容（可在开发者功能中编辑）
+}
+
+struct PromptTagCategory: Codable, Identifiable, Equatable {
+    var id: String
+    var name: String            // 小说类型 / 内容流派 / 风格基调
+    var tags: [PromptTag]
+}
+
+// MARK: - 内置提示词条目
+
+struct BuiltInPrompt: Identifiable {
+    let id: String
+    let name: String            // 展示名
+    let category: String        // 分类（写作 / 立项 / 档案 / 助手）
+    let placeholders: [String]  // 模板占位符说明
+    let defaultText: String     // 出厂默认文本（不落盘，仅作回退）
+}
+
+/// 稳定的提示词 ID 常量
+enum PromptID {
+    static let continueWriting = "prompt.continue.system"
+    static let rewrite = "prompt.rewrite.system"
+    static let summarize = "prompt.summarize.system"
+    static let creationBlueprint = "prompt.creation.blueprint.system"
+    static let creationRevise = "prompt.creation.revise.system"
+    static let writingAssistant = "prompt.assistant.system"
+}
+
+// MARK: - 提示词与标签库（全局单例）
+
+/// 应用级配置仓库：
+/// 1. 六套内置系统提示词的「用户覆盖文本」（未覆盖时回退出厂默认）；
+/// 2. 一句话立项的示例标签库（分类 / 关键词 / 完整预设内容），支持开发者增删改。
+/// 持久化：Application Support/ZhiMing/prompts.json（原子写入，独立于 library.json）。
+@MainActor
+final class PromptLibrary: ObservableObject {
+    static let shared = PromptLibrary()
+
+    /// 提示词覆盖表：id -> 用户自定义文本；为空表示使用出厂默认
+    @Published private(set) var overrides: [String: String] = [:]
+    /// 示例标签库（三类，可扩展）
+    @Published var tagCategories: [PromptTagCategory] = []
+
+    /// 全部内置提示词清单（开发者功能列表数据源）
+    let builtInPrompts: [BuiltInPrompt]
+
+    private struct Document: Codable {
+        var version: Int = 1
+        var overrides: [String: String]
+        var tagCategories: [PromptTagCategory]
+    }
+
+    static var fileURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("ZhiMing", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("prompts.json")
+    }
+
+    private init() {
+        builtInPrompts = Self.makeBuiltInPrompts()
+        if let data = try? Data(contentsOf: Self.fileURL),
+           let doc = try? JSONDecoder().decode(Document.self, from: data) {
+            overrides = doc.overrides
+            tagCategories = doc.tagCategories.isEmpty ? Self.defaultTagCategories() : doc.tagCategories
+        } else {
+            tagCategories = Self.defaultTagCategories()
+        }
+    }
+
+    /// 原子保存；所有写操作后调用
+    func save() {
+        let doc = Document(overrides: overrides, tagCategories: tagCategories)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(doc) else { return }
+        try? data.write(to: Self.fileURL, options: [.atomic])
+    }
+
+    // MARK: 提示词读取与覆盖
+
+    /// 当前生效文本：用户覆盖优先，否则出厂默认
+    func resolvedText(for id: String) -> String {
+        guard let prompt = builtInPrompts.first(where: { $0.id == id }) else { return "" }
+        return overrides[id] ?? prompt.defaultText
+    }
+
+    func isCustomized(_ id: String) -> Bool { overrides[id] != nil }
+
+    /// 保存覆盖；若与出厂默认一致则移除覆盖（保持文档干净）
+    func setOverride(_ id: String, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let prompt = builtInPrompts.first(where: { $0.id == id }),
+           trimmed == prompt.defaultText.trimmingCharacters(in: .whitespacesAndNewlines) {
+            overrides.removeValue(forKey: id)
+        } else {
+            overrides[id] = text
+        }
+        save()
+    }
+
+    /// 恢复出厂默认
+    func resetOverride(_ id: String) {
+        overrides.removeValue(forKey: id)
+        save()
+    }
+
+    /// 占位符替换：模板中的 {key} 替换为对应值；未提供的占位符替换为空串
+    static func render(_ template: String, values: [String: String]) -> String {
+        var out = template
+        // 先收集模板里实际出现的占位符键，避免遗漏清理
+        let known = ["mode", "title", "synopsis", "styleGuide"]
+        for key in known {
+            let token = "{\(key)}"
+            guard out.contains(token) else { continue }
+            out = out.replacingOccurrences(of: token, with: values[key] ?? "")
+        }
+        return out
+    }
+
+    // MARK: 智能注入匹配（隐性使用机制）
+
+    /// 规则：仅当「标签已被启用」且「输入包含该标签关键词」时返回其预设内容；
+    /// 未启用 → 绝不注入；全部未启用或无一命中 → 返回 nil（只发原始输入）。
+    func matchedSupplement(enabledIDs: [String], input: String) -> String? {
+        guard !enabledIDs.isEmpty, !input.isEmpty else { return nil }
+        var lines: [String] = []
+        for category in tagCategories {
+            for tag in category.tags where enabledIDs.contains(tag.id) {
+                let hit = input.contains(tag.name)
+                    || tag.keywords.contains(where: { !$0.isEmpty && input.contains($0) })
+                if hit {
+                    lines.append("◆ \(tag.name)：\(tag.presetText)")
+                }
+            }
+        }
+        guard !lines.isEmpty else { return nil }
+        return "【创作方向补充】\n以下为作者启用的创作方向约束，规划蓝图（题材、人物、世界观、卷章节奏）时必须严格遵循：\n"
+            + lines.joined(separator: "\n")
+    }
+
+    // MARK: 标签库维护（开发者功能）
+
+    func upsertTag(_ tag: PromptTag, categoryId: String) {
+        guard let index = tagCategories.firstIndex(where: { $0.id == categoryId }) else { return }
+        if let tagIndex = tagCategories[index].tags.firstIndex(where: { $0.id == tag.id }) {
+            tagCategories[index].tags[tagIndex] = tag
+        } else {
+            tagCategories[index].tags.append(tag)
+        }
+        save()
+    }
+
+    func deleteTag(_ tag: PromptTag, categoryId: String) {
+        guard let index = tagCategories.firstIndex(where: { $0.id == categoryId }) else { return }
+        tagCategories[index].tags.removeAll { $0.id == tag.id }
+        save()
+    }
+
+    // MARK: 出厂数据
+
+    private static func makeBuiltInPrompts() -> [BuiltInPrompt] {
+        [
+            BuiltInPrompt(
+                id: PromptID.continueWriting,
+                name: "续写 · 系统提示词",
+                category: "写作",
+                placeholders: [],
+                defaultText: """
+                你是一位资深中文小说作者，正在续写长篇小说的一章。严格遵守：
+                1. 承接【正文末尾】自然续写，禁止重复或复述已有内容；
+                2. 遵循【风格约束】与【角色当前状态】，人物言行不得 OOC；
+                3. 参考【前文摘要】与【关键事实】保持设定连续，不得与已确立事实矛盾；
+                4. 场景推进参考【本章细纲】，但允许合理的临场发挥；
+                5. 对话要有潜台词与动作细节，避免说明文式陈述；
+                6. 只输出正文，不要标题、解释、前言或总结。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.rewrite,
+                name: "改写/润色/扩写 · 系统提示词",
+                category: "写作",
+                placeholders: ["{mode}＝操作名（改写/润色/扩写）"],
+                defaultText: """
+                你是一位资深中文小说编辑。用户会给出一段小说正文并要求{mode}。严格遵守：
+                1. 只输出修改后的完整段落，不要解释修改原因；
+                2. 保持原有人称、时态与叙事视角；
+                3. 保留原文确立的事实与人物关系，不得引入新设定。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.summarize,
+                name: "章节摘要建档 · 系统提示词",
+                category: "档案",
+                placeholders: [],
+                defaultText: """
+                你负责为长篇小说章节建立档案。读取章节正文后输出 JSON（不要输出其他内容）：
+                {"summary": "120-200字的本章摘要，覆盖主要事件与人物动向", "key_facts": ["本章新确立、后续章节必须记住的事实，每条不超过30字，3-8条"]}
+                关键事实只收录不可逆的设定变化：人物状态改变、关系转折、秘密揭露、物品归属、地点变化等。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.creationBlueprint,
+                name: "立项蓝图生成 · 系统提示词",
+                category: "立项",
+                placeholders: [],
+                defaultText: """
+                你是一位资深小说策划。用户给出一句创意，请输出一套可编辑的小说蓝图，严格输出 JSON（不要输出其他内容）：
+                {
+                  "title_suggestion": "书名",
+                  "theme": "主题与基调（50字内）",
+                  "synopsis": "200字内的故事梗概",
+                  "perspective": "叙事视角",
+                  "style_guide": "文风约束（100字内）",
+                  "characters": [{"name": "", "role": "主角/配角", "appearance": "", "personality": "", "goal": ""}],
+                  "worldbuilding": [{"category": "地点/势力/规则/物品", "name": "", "content": ""}],
+                  "volumes": [{"name": "卷名", "outline": "卷纲（100字内）", "chapters": [{"title": "", "detailed_outline": "细纲（80字内）"}]}]
+                }
+                第一卷至少给出 3 章细纲，其余卷各 2-3 章占位即可。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.creationRevise,
+                name: "立项蓝图修订 · 系统提示词",
+                category: "立项",
+                placeholders: [],
+                defaultText: """
+                你是一位资深小说策划。用户已有一套小说蓝图，现在提出修改意见。
+                请基于当前蓝图按意见修订，输出修订后的完整蓝图，严格输出 JSON（不要输出其他内容），
+                字段结构与原蓝图一致；意见未涉及的字段原样保留，不得遗漏。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.writingAssistant,
+                name: "写作助手 · 系统提示词",
+                category: "助手",
+                placeholders: ["{title}＝书名"],
+                defaultText: """
+                你是小说《{title}》的写作助手，帮助作者头脑风暴、解答剧情与技法问题，回答简洁具体。
+                """
+            ),
+        ]
+    }
+
+    /// 三类十五个初始示例标签（开发者可在应用内增删改）
+    static func defaultTagCategories() -> [PromptTagCategory] {
+        [
+            PromptTagCategory(id: "cat.genre", name: "小说类型", tags: [
+                PromptTag(id: "tag.lightnovel", name: "轻小说", keywords: ["轻小说"], presetText:
+                    "以轻小说笔法规划：节奏明快，单场景信息密度低；主角设定带一个鲜明的「萌点」或反差标签；大量生活化对白与内心吐槽，段落短促；卷首 3 章内必须完成金手指展示与第一个小高潮；避免大段环境描写与复杂多线叙事。"),
+                PromptTag(id: "tag.mystery", name: "推理小说", keywords: ["推理", "侦探", "凶案", "诡计"], presetText:
+                    "按本格推理规范规划：开篇 3 章内抛出核心谜面（密室/不在场证明/失踪）；线索公平分布，关键证据在前文必须出现过；设计一层误导性伪解答与一层真解答；红鲱鱼角色不超过两个；诡计需在现实逻辑内自洽，禁止超自然作弊。"),
+                PromptTag(id: "tag.scifi", name: "科幻小说", keywords: ["科幻", "星际", "赛博朋克", "末世", "AI"], presetText:
+                    "以硬科幻质感规划：确立一个贯穿全书的核心科幻奇观与技术规则（如曲率航行、记忆上传、生态崩溃），所有冲突围绕该设定的限制展开；技术代价与副作用要具体；社会形态随技术推演；避免出现与已立物理规则矛盾的情节。"),
+                PromptTag(id: "tag.fantasy", name: "奇幻小说", keywords: ["奇幻", "魔法", "异世界", "龙", "精灵"], presetText:
+                    "按史诗奇幻框架规划：先建立自洽的力量体系（魔法来源、施法代价、等级边界），战斗胜负必须受体系约束；种族与势力地图清晰，每个地名首次出现时给出一句氛围白描；主线围绕一件古老遗物或一个预言推进；保留至少一个非人视角的支线。"),
+                PromptTag(id: "tag.romance", name: "言情小说", keywords: ["言情", "恋爱", "甜宠", "爱情"], presetText:
+                    "以情感线为主轴规划：男女主各自有独立的职业目标与性格缺陷，感情推进由事件驱动而非巧合堆砌；每卷设置一次关系危机与一次心动峰值；对手戏注重潜台词与肢体细节；结局走向与情感浓度匹配，避免强行降智误会。"),
+            ]),
+            PromptTagCategory(id: "cat.school-of-flow", name: "内容流派", tags: [
+                PromptTag(id: "tag.infiniteflow", name: "无限流", keywords: ["无限流", "副本", "轮回空间"], presetText:
+                    "按无限流结构规划：主神空间/轮回系统的规则三章内讲清（积分、兑换、惩罚机制）；每个副本是一个封闭谜题，有独立恐怖/生存主题与通关条件；队友配置兼顾战力与背刺可能；副本间穿插主世界的成长线与隐藏真相铺垫。"),
+                PromptTag(id: "tag.campusflow", name: "学院流", keywords: ["学院流", "学院", "校园", "入学"], presetText:
+                    "以学院体系为核心舞台规划：学院的等级/考核/社团/禁地规则明确且被反复使用；同学关系是主要人际网络，竞争者、室友、导师各司其职；升级节奏绑定学期节点（月考→期末→学年末大比）；校园之外的世界观通过课程与传说逐步揭开。"),
+                PromptTag(id: "tag.transmigration", name: "穿越流", keywords: ["穿越", "穿书", "快通", "快穿"], presetText:
+                    "按穿越叙事规范规划：现代知识/记忆与异世界规则的错位是前期核心笑点与爽点来源；原主遗留的人际债与身份谜团要在前两卷清算完毕；金手指克制且有限制条款；保留一条「能否回归原世界」的情感暗线作为后期抉择。"),
+                PromptTag(id: "tag.rebirth", name: "重生流", keywords: ["重生", "重回", "重来一世"], presetText:
+                    "按重生流规范规划：重生者携带的未来信息是资源也是诅咒——每次预知兑现都会偏移时间线；前世仇敌的崛起路径给出合理动因而非脸谱化恶；利用先知优势时要付出代价（失去先机、暴露异常）；中期让时间线偏离到先知彻底失效，逼主角靠自身实力。"),
+                PromptTag(id: "tag.systemflow", name: "系统流", keywords: ["系统流", "系统", "金手指", "签到", "面板"], presetText:
+                    "按系统流规范规划：系统面板字段（属性/任务/商城）第一章内亮相但不过度刷屏；系统任务驱动章节节奏，奖励与惩罚都要落在具体剧情上；系统本身留有人格化或来历悬念作为长线伏笔；数值膨胀控制在可感知范围内，避免秒天秒地。"),
+            ]),
+            PromptTagCategory(id: "cat.tone", name: "风格基调", tags: [
+                PromptTag(id: "tag.sweet", name: "高糖无刀", keywords: ["高糖", "无刀", "甜文", "撒糖"], presetText:
+                    "全程高糖基调：无重大角色伤亡、无背叛刀点；矛盾限于误会、吃醋与外部阻力且当章化解；每章至少一场高甜互动（日常投喂、护短、双向奔赴）；反派威胁存在但不伤害主角团核心情感；结尾必留糖。"),
+                PromptTag(id: "tag.brainy", name: "剧情烧脑", keywords: ["烧脑", "反转", "伏笔", "悬疑"], presetText:
+                    "烧脑叙事标准：每卷埋设不少于三条跨卷伏笔并在后续回收；关键真相采用多层反转（第一层看似合理、第二层颠覆动机、第三层重构时间线）；信息差驱动悬念，读者视角始终少于主角或早于主角半步；杜绝靠隐瞒关键信息制造假悬念。"),
+                PromptTag(id: "tag.slicelife", name: "轻松日常", keywords: ["轻松", "日常", "搞笑", "沙雕"], presetText:
+                    "轻松日常基调：单元剧结构为主，每章一个完整小事件；幽默来自角色性格错位与吐槽互动，不靠刻意装疯卖傻；无沉重主线压迫感，长线目标以背景板形式缓慢推进；允许偶尔温情瞬间调剂，但整体保持松弛治愈。"),
+                PromptTag(id: "tag.dark", name: "暗黑悬疑", keywords: ["暗黑", "致郁", "压抑", "克苏鲁"], presetText:
+                    "暗黑悬疑基调：世界观底色残酷，规则冰冷且执行到位（主要角色可以死）；恐惧来自未知与不可抗力而非血浆堆砌；真相层层剥离但每层都更令人绝望；保留一点微弱的人性微光作为情绪锚点；避免无意义的虐，所有黑暗服务于主题表达。"),
+                PromptTag(id: "tag.hotblooded", name: "热血燃向", keywords: ["热血", "燃", "战斗", "升级"], presetText:
+                    "热血燃向基调：以「绝境→爆发→逆转」为标准战斗曲线；主角每一次变强都要有明确的努力或代价支撑；伙伴羁绊与对手敬意并重，宿敌要有值得尊重的理由；关键战役前必有蓄力铺垫，胜利瞬间给足仪式感；口号式台词克制使用，燃点靠行动兑现。"),
+            ]),
+        ]
+    }
+}
