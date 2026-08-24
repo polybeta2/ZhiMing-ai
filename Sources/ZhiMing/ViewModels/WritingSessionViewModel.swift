@@ -46,7 +46,16 @@ final class WritingSessionViewModel: ObservableObject {
         case .rewrite(let rewriteMode, let selection):
             baseMessages = PromptTemplates.rewrite(mode: rewriteMode, selection: selection, instruction: instruction)
         }
-        let messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: baseMessages)
+        // R18 增强：按输入语言注入对应版本的虚构情色写作规范（语言二选一，不混注）
+        var scoped = baseMessages
+        if novel.r18Enabled {
+            let sample = (instruction?.isEmpty == false) ? instruction! : String(chapter.content.prefix(400))
+            scoped = PromptTemplates.applying(
+                providerExtra: PromptLibrary.shared.r18Supplement(forInput: sample),
+                to: scoped
+            )
+        }
+        let messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: scoped)
 
         streamTask = Task {
             // 流式节流：delta 先进缓冲，约 100ms 刷新一次发布属性，避免逐字重渲染卡顿

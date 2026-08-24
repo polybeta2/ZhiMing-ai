@@ -46,8 +46,13 @@ enum PromptTemplates {
         return [.init(role: .system, content: system), .init(role: .user, content: brief)]
     }
 
-    static func creationRevise(blueprintJSON: String, feedback: String) -> [LLMMessage] {
-        let system = PromptLibrary.shared.resolvedText(for: PromptID.creationRevise)
+    /// supplement：R18 规范等补充约束，拼接在系统提示词之后、用户输入之前。
+    static func creationRevise(blueprintJSON: String, feedback: String, supplement: String? = nil) -> [LLMMessage] {
+        var system = PromptLibrary.shared.resolvedText(for: PromptID.creationRevise)
+        if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !supplement.isEmpty {
+            system += "\n\n" + supplement
+        }
         let user = """
         【当前蓝图】
         \(blueprintJSON)

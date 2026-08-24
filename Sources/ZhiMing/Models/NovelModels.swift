@@ -16,6 +16,8 @@ final class Novel: Identifiable, ObservableObject, Codable {
     @Published var accentColorHex: String?
     /// 一句话立项时用户启用的示例标签 id（生成蓝图时按关键词命中注入预设内容）
     @Published var enabledTagIDs: [String] = []
+    /// R18 增强：开启后写作/立项请求自动注入虚构情色写作规范（按输入语言二选一）
+    @Published var r18Enabled: Bool = false
     @Published var createdAt: Date
     @Published var updatedAt: Date
 
@@ -36,7 +38,7 @@ final class Novel: Identifiable, ObservableObject, Codable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, synopsis, genre, perspective, styleGuide
-        case accentColorHex, enabledTagIDs, createdAt, updatedAt
+        case accentColorHex, enabledTagIDs, r18Enabled, createdAt, updatedAt
         case volumes, characters, worldEntries, chatThreads
     }
 
@@ -50,6 +52,7 @@ final class Novel: Identifiable, ObservableObject, Codable {
         styleGuide = try c.decodeIfPresent(String.self, forKey: .styleGuide)
         accentColorHex = try c.decodeIfPresent(String.self, forKey: .accentColorHex)
         enabledTagIDs = try c.decodeIfPresent([String].self, forKey: .enabledTagIDs) ?? []
+        r18Enabled = try c.decodeIfPresent(Bool.self, forKey: .r18Enabled) ?? false
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
         volumes = try c.decode([Volume].self, forKey: .volumes)
@@ -79,6 +82,7 @@ final class Novel: Identifiable, ObservableObject, Codable {
         try c.encodeIfPresent(styleGuide, forKey: .styleGuide)
         try c.encodeIfPresent(accentColorHex, forKey: .accentColorHex)
         try c.encode(enabledTagIDs, forKey: .enabledTagIDs)
+        try c.encode(r18Enabled, forKey: .r18Enabled)
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(updatedAt, forKey: .updatedAt)
         try c.encode(volumes, forKey: .volumes)
@@ -86,6 +90,11 @@ final class Novel: Identifiable, ObservableObject, Codable {
         try c.encode(worldEntries, forKey: .worldEntries)
         try c.encode(chatThreads, forKey: .chatThreads)
     }
+}
+
+extension Novel {
+    /// R18 作品的强制强调色（血红色），开启期间不可修改
+    static let r18AccentHex = "#CC0000"
 }
 
 final class Volume: Identifiable, ObservableObject, Codable {

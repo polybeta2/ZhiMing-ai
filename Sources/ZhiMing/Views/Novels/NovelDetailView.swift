@@ -54,7 +54,35 @@ extension Novel {
 
 /// 设定页签：角色卡 / 世界观 / 大纲 入口
 private struct NovelSettingsTab: View {
+    @EnvironmentObject private var store: AppStore
     @ObservedObject var novel: Novel
+
+    // R18 开关（与建书表单共用确认状态）
+    @AppStorage("r18.notice.confirmed.v1") private var r18NoticeConfirmed = false
+    @State private var showR18Notice = false
+
+    private var r18Binding: Binding<Bool> {
+        Binding(
+            get: { novel.r18Enabled },
+            set: { newValue in
+                if newValue && !r18NoticeConfirmed {
+                    showR18Notice = true
+                } else {
+                    applyR18(newValue)
+                }
+            }
+        )
+    }
+
+    private func applyR18(_ enabled: Bool) {
+        novel.r18Enabled = enabled
+        if enabled {
+            novel.accentColorHex = Novel.r18AccentHex
+        } else if novel.accentColorHex == Novel.r18AccentHex {
+            novel.accentColorHex = AppTheme.accentPresets[0].hexString
+        }
+        store.save()
+    }
 
     var body: some View {
         List {
@@ -118,6 +146,27 @@ private struct NovelSettingsTab: View {
                 }
                 .padding(.vertical, AppTheme.spacing[0])
             }
+            Section("成人内容") {
+                Toggle(isOn: r18Binding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("R18 增强（虚构情色写作辅助）")
+                        Text(novel.r18Enabled
+                             ? "已开启：写作请求自动注入对应语言的本地 R18 规范；强调色锁定血红"
+                             : "关闭中；开启后强调色强制血红色并标注 R18 Enabled")
+                            .font(.caption)
+                            .foregroundStyle(novel.r18Enabled ? Color.red : .secondary)
+                    }
+                }
+            }
+        }
+        .alert("启用 R18 增强？", isPresented: $showR18Notice) {
+            Button("同意并开启") {
+                r18NoticeConfirmed = true
+                applyR18(true)
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("说明：此功能仅为合规的 R18 写作提示词注入，用于增强小说文采与场景表现力，并非「破甲」或「越狱」提示词。\n\n提醒：如需更高级别的 R18 内容生成，请自行配置相应模型或 API 权限，本功能不涉及任何绕过模型安全策略的操作。\n\n免责声明：生成的所有内容均由您自行负责，与本应用开发者及运营方无关。")
         }
     }
 }

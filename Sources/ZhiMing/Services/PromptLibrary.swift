@@ -35,6 +35,8 @@ enum PromptID {
     static let creationBlueprint = "prompt.creation.blueprint.system"
     static let creationRevise = "prompt.creation.revise.system"
     static let writingAssistant = "prompt.assistant.system"
+    static let r18zh = "prompt.r18.system.zh"
+    static let r18en = "prompt.r18.system.en"
 }
 
 // MARK: - 提示词与标签库（全局单例）
@@ -151,6 +153,74 @@ final class PromptLibrary: ObservableObject {
             + lines.joined(separator: "\n")
     }
 
+    // MARK: R18 增强（fictional-erotica 双语规范，语言分离注入）
+
+    /// 输入语言检测："zh" / "en"。
+    /// 统计 CJK 表意字符与拉丁字母占比；完全无文字时默认中文（应用主语言）；
+    /// 占比相同（中英混合平局）时按最后一句的构成判定。
+    static func detectLanguage(_ text: String) -> String {
+        var cjk = 0, latin = 0
+        for scalar in text.unicodeScalars {
+            let v = scalar.value
+            if (0x4E00...0x9FFF).contains(v) || (0x3400...0x4DBF).contains(v) || (0xF900...0xFAFF).contains(v) {
+                cjk += 1
+            } else if (0x41...0x5A).contains(v) || (0x61...0x7A).contains(v) {
+                latin += 1
+            }
+        }
+        if cjk == 0 && latin == 0 { return "zh" }
+        if cjk == latin {
+            let parts = text.split(whereSeparator: { ".!?。！？；;\n".contains($0) })
+            let lastSentence = parts.last.map(String.init) ?? text
+            var c2 = 0, l2 = 0
+            for scalar in lastSentence.unicodeScalars {
+                let v = scalar.value
+                if (0x4E00...0x9FFF).contains(v) { c2 += 1 }
+                else if (0x41...0x5A).contains(v) || (0x61...0x7A).contains(v) { l2 += 1 }
+            }
+            return c2 >= l2 ? "zh" : "en"
+        }
+        return cjk > latin ? "zh" : "en"
+    }
+
+    /// R18 增强的资源查找：SwiftPM 资源在 iOS 上位于 ZhiMing_ZhiMing.bundle，
+    /// 查不到时回退 Bundle.main（兼容 macOS / 预览）。
+    private static let skillPackRoot: Bundle = {
+        if let url = Bundle.main.url(forResource: "ZhiMing_ZhiMing", withExtension: "bundle"),
+           let inner = Bundle(url: url) {
+            return inner
+        }
+        return Bundle.main
+    }()
+
+    /// 本地打包的 fictional-erotica 单语言全文（零网络依赖）。
+    static func bundledR18Text(language: String) -> String? {
+        let name = language == "en" ? "skill.en" : "skill.zh"
+        guard let url = skillPackRoot.url(
+            forResource: name,
+            withExtension: "md",
+            subdirectory: "SkillPacks/fictional-erotica"
+        ), let text = try? String(contentsOf: url, encoding: .utf8),
+           !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// 按输入主语言取对应语言版本的 R18 规范——中英永不混合注入。
+    /// 优先级：开发者覆盖文本 > 本地打包 Skill 全文 > 出厂精简版。
+    /// 调用方负责先判断 novel.r18Enabled。
+    func r18Supplement(forInput input: String) -> String {
+        let lang = Self.detectLanguage(input)
+        let id = lang == "en" ? PromptID.r18en : PromptID.r18zh
+        if let override = overrides[id],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return override
+        }
+        if let bundled = Self.bundledR18Text(language: lang) {
+            return bundled
+        }
+        return resolvedText(for: id)
+    }
+
     // MARK: 标签库维护（开发者功能）
 
     func upsertTag(_ tag: PromptTag, categoryId: String) {
@@ -249,6 +319,42 @@ final class PromptLibrary: ObservableObject {
                 placeholders: ["{title}＝书名"],
                 defaultText: """
                 你是小说《{title}》的写作助手，帮助作者头脑风暴、解答剧情与技法问题，回答简洁具体。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.r18zh,
+                name: "R18 规范 · 中文版（fictional-erotica）",
+                category: "R18",
+                placeholders: [],
+                defaultText: """
+                【R18 虚构情色写作规范（fictional-erotica · 中文版，作者已确认启用）】
+                本书为面向成年读者的虚构小说。涉及亲密场景时遵循：
+                1. 核心原则：性场景是人物切片与关系现场，不是可替换的动作序列；递进来自行动、认知、情感、权力、身体状态、注意力或关系中有意义的改变、深化、延迟或有意维持，而非机械加码；
+                2. 人物声带：每个角色保留自己的语言习惯与欲望表达方式，禁止集体套用模板化色情台词；
+                3. 身体连续：衣物、双手、姿势、视线与物件在动作间保持连续，位置变化要有过程；
+                4. 内在视角：感觉、念头、欲望与关系同时流动但互不混淆，贴近当下，不写成关系分析报告；
+                5. 明确度控制：默认 open-door（可直白），词汇语域 direct-neutral（直接而中性），避免器官清单式罗列与委婉语迷雾；作者另有指定时按指定执行（closed / sensual / open-door / explicit）；
+                6. 自愿前提：角色间互动以相互意愿为前提，犹豫、拒绝等信号必须被对方尊重；
+                7. 场景收束：允许升级、停顿、改道或保持未解决，不必强行对称高潮；结束后给出情绪落点与关系变化。
+                本规范仅用于虚构创作，输出仍受所配置模型能力边界约束。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.r18en,
+                name: "R18 Standard · English (fictional-erotica)",
+                category: "R18",
+                placeholders: [],
+                defaultText: """
+                [R18 Fictional Erotica Writing Standard — fictional-erotica, English edition, author-enabled]
+                This book is adult-oriented fiction. For intimate scenes:
+                1. Core principle: a sex scene is a slice of character and a live expression of relationship dynamics — progression means meaningful change, deepening, deferral, or deliberate hold in action, knowledge, feeling, power, body state, attention, or relationship; never mechanical escalation;
+                2. Character voice: each character keeps their own speech patterns and desire vocabulary; never collapse them into one stock porn voice;
+                3. Embodied continuity: clothing, hands, positions, gaze, and objects stay continuous between beats; every change of position has a process;
+                4. Close interiority: sensation, thought, desire, and relationship move together without collapsing into one another — stay in the moment, never narrate relationship analysis;
+                5. Explicitness controls: default open-door with a direct-neutral lexical register; readable anatomy and action without clinical inventory or euphemistic fog; honor any author override (closed / sensual / open-door / explicit);
+                6. Consent premise: mutual willingness is the precondition of any scene; hesitation or refusal signals must be respected by the other character;
+                7. Scene movement: scenes may escalate, pause, redirect, fail, or remain unresolved without compulsory symmetry or climax; land the emotional aftermath and the relationship shift afterwards.
+                For fictional use only; output remains subject to the configured model's capabilities.
                 """
             ),
         ]

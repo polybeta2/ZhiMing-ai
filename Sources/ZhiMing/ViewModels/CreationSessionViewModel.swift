@@ -91,7 +91,7 @@ final class CreationSessionViewModel: ObservableObject {
 
     // MARK: 对话修订
 
-    func revise(feedback: String, provider: ProviderConfig) {
+    func revise(feedback: String, provider: ProviderConfig, supplement: String? = nil) {
         guard let json = blueprintJSON() else {
             errorMessage = "当前没有可修订的蓝图"
             phase = .collecting
@@ -111,7 +111,7 @@ final class CreationSessionViewModel: ObservableObject {
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
         let messages = PromptTemplates.applying(
             providerExtra: provider.systemPromptExtra,
-            to: PromptTemplates.creationRevise(blueprintJSON: json, feedback: feedback)
+            to: PromptTemplates.creationRevise(blueprintJSON: json, feedback: feedback, supplement: supplement)
         )
         stream(messages: messages, client: client, config: config)
     }

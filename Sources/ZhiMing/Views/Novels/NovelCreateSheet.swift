@@ -25,6 +25,25 @@ struct NovelCreateSheet: View {
     @State private var previewTag: PromptTag?
     @ObservedObject private var library = PromptLibrary.shared
 
+    // R18 增强（两种建书方式共用；开启需首次确认免责说明）
+    @State private var r18Enabled = false
+    @AppStorage("r18.notice.confirmed.v1") private var r18NoticeConfirmed = false
+    @State private var showR18Notice = false
+
+    /// 开启时若未确认过免责说明，先弹确认框
+    private var r18Binding: Binding<Bool> {
+        Binding(
+            get: { r18Enabled },
+            set: { newValue in
+                if newValue && !r18NoticeConfirmed {
+                    showR18Notice = true
+                } else {
+                    r18Enabled = newValue
+                }
+            }
+        )
+    }
+
     private let perspectiveOptions = ["", "第一人称", "第三人称限知", "第三人称全知", "多视角交替"]
 
     var body: some View {
@@ -42,6 +61,15 @@ struct NovelCreateSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
+            }
+            .alert("启用 R18 增强？", isPresented: $showR18Notice) {
+                Button("同意并开启") {
+                    r18NoticeConfirmed = true
+                    r18Enabled = true
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("说明：此功能仅为合规的 R18 写作提示词注入，用于增强小说文采与场景表现力，并非「破甲」或「越狱」提示词。\n\n提醒：如需更高级别的 R18 内容生成，请自行配置相应模型或 API 权限，本功能不涉及任何绕过模型安全策略的操作。\n\n免责声明：生成的所有内容均由您自行负责，与本应用开发者及运营方无关。")
             }
         }
     }
@@ -135,6 +163,22 @@ struct NovelCreateSheet: View {
                     Spacer()
                 }
                 .padding(.vertical, AppTheme.spacing[0])
+                .disabled(r18Enabled)
+                if r18Enabled {
+                    Text("已启用 R18：本作品强调色锁定为血红色")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+            }
+            Section("成人内容") {
+                Toggle(isOn: r18Binding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("R18 增强（虚构情色写作辅助）")
+                        Text("开启后写作与立项自动注入对应语言的 R18 写作规范；强调色强制血红色并标注 R18 Enabled")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             Section {
                 Button("创建作品") { createBlank() }
@@ -150,7 +194,9 @@ struct NovelCreateSheet: View {
         let novel = Novel(title: name, synopsis: synopsis.trimmingCharacters(in: .whitespaces))
         novel.perspective = perspective.isEmpty ? nil : perspective
         novel.styleGuide = styleGuide.isEmpty ? nil : styleGuide.trimmingCharacters(in: .whitespaces)
-        novel.accentColorHex = AppTheme.accentPresets[accentIndex].hexString
+        // R18 开启时强调色强制血红色，忽略用户所选
+        novel.accentColorHex = r18Enabled ? Novel.r18AccentHex : AppTheme.accentPresets[accentIndex].hexString
+        novel.r18Enabled = r18Enabled
 
         let volume = Volume(name: "第一卷", sortOrder: 1)
         volume.novel = novel
@@ -221,6 +267,15 @@ struct NovelCreateSheet: View {
                 Text("点击标签预览完整内容；打开「启用」后，只有当你的创意中包含该标签的关键词时才会注入对应指导。未启用的标签永不注入。")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+
+                Toggle(isOn: r18Binding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("R18 增强（虚构情色写作辅助）").font(.subheadline)
+                        Text(r18Enabled ? "已开启：注入本地打包的 R18 写作规范（按语言二选一），强调色锁定血红" : "为本书开启成人向写作规范注入")
+                            .font(.caption2)
+                            .foregroundStyle(r18Enabled ? Color.red : .secondary)
+                    }
+                }
             }
         }
         .frame(maxHeight: 210)
@@ -253,7 +308,9 @@ struct NovelCreateSheet: View {
 
         let displayTitle = text.count <= 14 ? text : String(text.prefix(14)) + "…"
         let novel = Novel(title: displayTitle, synopsis: text)
-        novel.accentColorHex = AppTheme.accentPresets[0].hexString
+        // R18 开启时强调色强制血红色
+        novel.accentColorHex = r18Enabled ? Novel.r18AccentHex : AppTheme.accentPresets[0].hexString
+        novel.r18Enabled = r18Enabled
         novel.enabledTagIDs = Array(selectedTagIDs)   // 智能注入依据（ChatView 生成蓝图时读取）
 
         // 立项会话线程（Phase 8 状态机将读取 synopsis 作为初始创意）

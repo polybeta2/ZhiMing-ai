@@ -209,15 +209,26 @@ struct ChatView: View {
         guard let provider = activeProvider else { return }
 
         if creation.phase == .revising {
-            // 已有蓝图：作为修订意见
+            // 已有蓝图：作为修订意见（R18 书籍同样携带对应语言规范）
             lastCreationWasRevise = true
             beginCreationStream()
-            creation.revise(feedback: text, provider: provider)
+            var reviseSupplement: String?
+            if novel.r18Enabled {
+                reviseSupplement = PromptLibrary.shared.r18Supplement(forInput: text)
+            }
+            creation.revise(feedback: text, provider: provider, supplement: reviseSupplement)
         } else {
             // 无蓝图：作为创意生成蓝图（「重新生成」回退到最初创意）
             let brief = (text.contains("重新生成") && !novel.synopsis.isEmpty) ? novel.synopsis : text
             // 智能注入：仅「已启用标签」且输入命中其关键词时，才附加预设内容
-            let supplement = PromptLibrary.shared.matchedSupplement(enabledIDs: novel.enabledTagIDs, input: brief)
+            var parts: [String] = []
+            if let tags = PromptLibrary.shared.matchedSupplement(enabledIDs: novel.enabledTagIDs, input: brief) {
+                parts.append(tags)
+            }
+            if novel.r18Enabled {
+                parts.append(PromptLibrary.shared.r18Supplement(forInput: brief))
+            }
+            let supplement = parts.isEmpty ? nil : parts.joined(separator: "\n\n")
             lastCreationWasRevise = false
             beginCreationStream()
             creation.generateBlueprint(brief: brief, provider: provider, supplement: supplement)
@@ -281,11 +292,16 @@ struct ChatView: View {
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
 
         var messages: [LLMMessage] = []
-        let system = PromptTemplates.writingAssistantSystem(
+        var system = PromptTemplates.writingAssistantSystem(
             title: novel.title,
             synopsis: novel.synopsis,
             styleGuide: novel.styleGuide
         )
+        // R18 增强：按最近一条用户输入的语言注入对应版本规范
+        if novel.r18Enabled {
+            let sample = lastUserMessage?.content ?? thread.messages.last(where: { $0.role == "user" })?.content ?? ""
+            system += "\n\n" + PromptLibrary.shared.r18Supplement(forInput: sample)
+        }
         messages.append(.init(role: .system, content: system))
         messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: messages)
         for message in thread.messages.suffix(12) {

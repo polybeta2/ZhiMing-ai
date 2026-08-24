@@ -143,10 +143,16 @@ private struct NovelCardRow: View {
         return latest.title
     }
 
+    /// 卡片圆形色块颜色：R18 作品强制血红色，其余用作品自定义/默认色
+    private var displayColor: Color {
+        if novel.r18Enabled { return Color(hex: Novel.r18AccentHex) ?? .red }
+        return novel.accentColorHex.flatMap { Color(hex: $0) } ?? AppTheme.accentPresets[0]
+    }
+
     var body: some View {
         HStack(spacing: AppTheme.spacing[2]) {
             Circle()
-                .fill((novel.accentColorHex.flatMap { Color(hex: $0) } ?? AppTheme.accentPresets[0]).opacity(0.85))
+                .fill(displayColor.opacity(0.85))
                 .frame(width: 42, height: 42)
                 .overlay {
                     Image(systemName: "book.fill")
@@ -154,9 +160,16 @@ private struct NovelCardRow: View {
                         .foregroundStyle(.white)
                 }
             VStack(alignment: .leading, spacing: 3) {
-                Text(novel.title)
-                    .font(.headline)
-                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(novel.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    if novel.r18Enabled {
+                        Text("R18 Enabled")
+                            .font(.caption.bold())
+                            .foregroundColor(.red)
+                    }
+                }
                 Text(subtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
