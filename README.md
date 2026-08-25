@@ -22,7 +22,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 语言/UI | Swift 5.9 语义 · SwiftUI · iOS 17+ |
+| 语言/UI | Swift 5.9 语义 · SwiftUI · iOS 15+ |
 | 架构 | MVVM 四层：View / ViewModel / Service / Model |
 | 持久化 | 本地 JSON 文档存储（原子写入 Application Support），零第三方依赖 |
 | 网络 | URLSession + AsyncThrowingStream 实现 OpenAI 兼容 SSE 流式调用 |
