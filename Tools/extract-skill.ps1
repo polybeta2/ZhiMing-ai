@@ -1,8 +1,10 @@
-# 从 fictional-erotica 仓库提取单语言版本：
-# 仓库为逐段中英对照（EN 段落 + 中文段落交替），本脚本按块内 CJK/拉丁字符占比
-# 把每个 md 文件拆成 skill.zh.md 与 skill.en.md 两份纯语言文件。
+# 从 fictional-erotica 仓库提取单语言版本（按模块拆分）：
+# 仓库为逐段中英对照，本脚本按块内 CJK/拉丁字符占比，把 SKILL.md 与每个 reference
+# 各自拆成纯中文 / 纯英文两份，输出结构：
+#   <OutDir>/zh/{core,craft-controls,...}.md
+#   <OutDir>/en/{core,craft-controls,...}.md
 # 规则：标题行与表格、围栏代码块保留在两个版本；YAML frontmatter 丢弃；
-#       “Route References / 参考文件路由”导航节丢弃（由桥接说明替代）。
+#       “Route References / 参考文件路由”导航节丢弃（运行时由注入器负责路由）。
 param(
     [Parameter(Mandatory=$true)][string]$RepoDir,
     [Parameter(Mandatory=$true)][string]$OutDir
@@ -18,7 +20,7 @@ function Count-Script([string]$text, [ref]$cjkRef, [ref]$latRef) {
     }
 }
 
-function Split-File([string]$path, [string]$relName) {
+function Split-File([string]$path) {
     $lines = Get-Content -Path $path -Encoding UTF8
 
     # 去掉 YAML frontmatter
@@ -70,36 +72,31 @@ function Split-File([string]$path, [string]$relName) {
         if ($cjk -ge $lat) { $zh.Add($block) } else { $en.Add($block) }
     }
 
-    return @{
-        zh = ($zh -join "`n`n")
-        en = ($en -join "`n`n")
-    }
+    return @{ zh = ($zh -join "`n`n"); en = ($en -join "`n`n") }
 }
 
-New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-$refs = Get-ChildItem (Join-Path $RepoDir 'fictional-erotica/references') -Filter *.md | ForEach-Object { 'references/' + $_.Name }
-$targets = @('SKILL.md') + $refs
+$skillRoot = Join-Path $RepoDir 'fictional-erotica'
+$targets = @(
+    @{ src = 'SKILL.md';                                     name = 'core' },
+    @{ src = 'references/craft-controls.md';                 name = 'craft-controls' },
+    @{ src = 'references/persona-and-continuity.md';         name = 'persona-and-continuity' },
+    @{ src = 'references/sexual-roles.md';                   name = 'sexual-roles' },
+    @{ src = 'references/language-and-dialogue.md';          name = 'language-and-dialogue' },
+    @{ src = 'references/play-and-props.md';                 name = 'play-and-props' },
+    @{ src = 'references/speculative-anatomy.md';            name = 'speculative-anatomy' },
+    @{ src = 'references/canon-grounding-and-fanfiction.md'; name = 'canon-grounding-and-fanfiction' },
+    @{ src = 'references/core-calibration.md';               name = 'core-calibration' }
+)
 
-$zhAll = New-Object System.Collections.Generic.List[string]
-$enAll = New-Object System.Collections.Generic.List[string]
-$zhAll.Add('# 虚构情色写作规范 · 中文版（fictional-erotica 本地打包，来源 rs-skills-lab/fictional-erotica，MIT License）')
-$enAll.Add('# Fictional Erotica Writing Standard - English edition (bundled from rs-skills-lab/fictional-erotica, MIT License)')
+New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'zh') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'en') | Out-Null
+
 foreach ($t in $targets) {
-    $full = Join-Path $RepoDir ("fictional-erotica/" + $t)
-    if (-not (Test-Path $full)) { continue }
-    $r = Split-File -path $full -relName ("fictional-erotica/" + $t)
-    $tag = "### section: $t"
-    $zhAll.Add($tag); $zhAll.Add($r.zh)
-    $enAll.Add($tag); $enAll.Add($r.en)
-}
-
-$bridgeZh = '> 以上为 fictional-erotica 核心规范（本地打包版）。涉及攻受与行为角色、人设与跨场景连续、玩法道具、同人原作锚定、语言对白校准或高级控制台时，对应进阶模块已随包内置，可按需在后续请求中索取。'
-$bridgeEn = '> The above is the fictional-erotica core standard (bundled edition). Advanced modules - sexual roles, persona and cross-scene continuity, play & props, canon grounding, dialogue calibration, console - ship in this pack and can be requested when relevant.'
-
-Set-Content -Path (Join-Path $OutDir 'skill.zh.md') -Value (($zhAll -join "`n`n") + "`n`n" + $bridgeZh) -Encoding UTF8
-Set-Content -Path (Join-Path $OutDir 'skill.en.md') -Value (($enAll -join "`n`n") + "`n`n" + $bridgeEn) -Encoding UTF8
-
-foreach ($f in @('skill.zh.md', 'skill.en.md')) {
-    $p = Join-Path $OutDir $f
-    Write-Host ("{0}  {1:N0} chars" -f $f, (Get-Item $p).Length)
+    $full = Join-Path $skillRoot $t.src
+    if (-not (Test-Path $full)) { Write-Warning "missing: $full"; continue }
+    $r = Split-File -path $full
+    $srcLine = "<!-- 来源 fictional-erotica/$($t.src) · rs-skills-lab/fictional-erotica · MIT -->"
+    Set-Content -Path (Join-Path $OutDir "zh/$($t.name).md") -Value ($srcLine + "`n`n" + $r.zh) -Encoding UTF8
+    Set-Content -Path (Join-Path $OutDir "en/$($t.name).md") -Value ($srcLine + "`n`n" + $r.en) -Encoding UTF8
+    Write-Host ("{0}: zh {1:N0} / en {2:N0} chars" -f $t.name, $r.zh.Length, $r.en.Length)
 }

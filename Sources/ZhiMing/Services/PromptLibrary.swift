@@ -193,20 +193,51 @@ final class PromptLibrary: ObservableObject {
         return Bundle.main
     }()
 
-    /// 本地打包的 fictional-erotica 单语言全文（零网络依赖）。
-    static func bundledR18Text(language: String) -> String? {
-        let name = language == "en" ? "skill.en" : "skill.zh"
+    // MARK: - fictional-erotica 模块路由（核心常驻 + 特化模块按需加载）
+
+    /// 特化模块路由表：命中任一关键词才把该模块注入本次请求（对应上游 progressive disclosure）
+    struct R18ModuleRoute {
+        let file: String          // SkillPacks 内文件名（不含扩展名）
+        let title: String         // 注入时的分节标题
+        let keywords: [String]    // 中英混合关键词，小写匹配
+    }
+
+    static let r18ModuleRoutes: [R18ModuleRoute] = [
+        R18ModuleRoute(file: "craft-controls", title: "技法控制台（高级场景构建/修订）",
+            keywords: ["console", "控制台", "多阶段", "长镜头", "反复修改", "打磨", "修订", "节奏敏感"]),
+        R18ModuleRoute(file: "persona-and-continuity", title: "人设与跨场景连续性",
+            keywords: ["人设", "连续性", "跨场景", "可复用人物", "recurring", "多人", "三人", "群体", "poly", "threesome"]),
+        R18ModuleRoute(file: "sexual-roles", title: "攻受与行为角色",
+            keywords: ["攻受", "总攻", "总受", "top", "bottom", "switch", "gong", "shou", "插入位", "行为角色", "角色分配"]),
+        R18ModuleRoute(file: "language-and-dialogue", title: "语言与对白校准",
+            keywords: ["对白", "台词", "dirty talk", "情话", "语言风格", "语气", "声线", "dialogue"]),
+        R18ModuleRoute(file: "play-and-props", title: "玩法与道具",
+            keywords: ["道具", "玩具", "捆绑", "绳缚", "kink", "sm", "调教", "play", "玩法"]),
+        R18ModuleRoute(file: "speculative-anatomy", title: "幻想身体结构（人外）",
+            keywords: ["人外", "非人类", "非人", "兽人", "龙人", "蛇人", "触手", "异种", "怪物", "monster", "nonhuman", "tentacle"]),
+        R18ModuleRoute(file: "canon-grounding-and-fanfiction", title: "同人原作锚定",
+            keywords: ["同人", "二创", "原作", "canon", "au", "漫改", "性转", "ooc", "fanfiction"]),
+        R18ModuleRoute(file: "core-calibration", title: "输出校准诊断",
+            keywords: ["模板化", "太平淡", "干瘪", "不够色", "诊断", "校准", "generic", "水词"])
+    ]
+
+    /// 单次请求最多追加的特化模块数（防上下文爆炸；按路由表顺序取先命中者）
+    private static let maxModulesPerRequest = 4
+
+    /// 读取本地包内单个模块文件（零网络依赖）。language: "zh"/"en"
+    static func bundledSkillFile(_ name: String, language: String) -> String? {
         guard let url = skillPackRoot.url(
             forResource: name,
             withExtension: "md",
-            subdirectory: "SkillPacks/fictional-erotica"
+            subdirectory: "SkillPacks/fictional-erotica/\(language)"
         ), let text = try? String(contentsOf: url, encoding: .utf8),
            !text.isEmpty else { return nil }
         return text
     }
 
-    /// 按输入主语言取对应语言版本的 R18 规范——中英永不混合注入。
-    /// 优先级：开发者覆盖文本 > 本地打包 Skill 全文 > 出厂精简版。
+    /// 按输入主语言组装 R18 规范——中英永不混合注入：
+    /// 核心（SKILL.md 契约）常驻，其后按关键词命中追加特化模块（≤4 个）。
+    /// 优先级：开发者覆盖文本 > 本地打包 Skill > 出厂精简版。
     /// 调用方负责先判断 novel.r18Enabled。
     func r18Supplement(forInput input: String) -> String {
         let lang = Self.detectLanguage(input)
@@ -215,10 +246,25 @@ final class PromptLibrary: ObservableObject {
            !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return override
         }
-        if let bundled = Self.bundledR18Text(language: lang) {
-            return bundled
+
+        guard var core = Self.bundledSkillFile("core", language: lang) else {
+            return resolvedText(for: id)   // 包缺失：出厂精简版兜底
         }
-        return resolvedText(for: id)
+        // 核心里的路由节已被提取脚本移除，这里补一行运行时路由说明
+        core += "\n\n> 以下按本次请求命中的关键词加载对应特化模块。"
+
+        let lowered = input.lowercased()
+        var loaded: [String] = []
+        for route in Self.r18ModuleRoutes where loaded.count < Self.maxModulesPerRequest {
+            guard route.keywords.contains(where: { lowered.contains($0) }) else { continue }
+            guard let text = Self.bundledSkillFile(route.file, language: lang) else { continue }
+            core += "\n\n### § 特化模块：\(route.title)\n\n" + text
+            loaded.append(route.file)
+        }
+        #if DEBUG
+        print("[R18] 语言=\(lang) 注入模块=\(loaded.isEmpty ? "仅core" : loaded.joined(separator: ", "))")
+        #endif
+        return core
     }
 
     // MARK: 标签库维护（开发者功能）
