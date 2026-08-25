@@ -148,8 +148,11 @@ struct PromptEditView: View {
         }
         .alert("恢复出厂默认？", isPresented: $showResetConfirm) {
             Button("恢复", role: .destructive) {
-                library.resetOverride(prompt.id)
-                text = prompt.defaultText
+                // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
+                DispatchQueue.main.async {
+                    library.resetOverride(prompt.id)
+                    text = prompt.defaultText
+                }
             }
             Button("取消", role: .cancel) {}
         } message: {
@@ -231,10 +234,13 @@ struct TagEditView: View {
         }
         .alert("删除标签？", isPresented: $showDeleteConfirm) {
             Button("删除", role: .destructive) {
-                if let tag = existingTag {
-                    library.deleteTag(tag, categoryId: categoryId)
+                // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
+                DispatchQueue.main.async {
+                    if let tag = existingTag {
+                        library.deleteTag(tag, categoryId: categoryId)
+                    }
+                    dismiss()
                 }
-                dismiss()
             }
             Button("取消", role: .cancel) {}
         } message: {

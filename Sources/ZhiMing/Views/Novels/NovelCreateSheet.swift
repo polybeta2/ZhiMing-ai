@@ -64,8 +64,11 @@ struct NovelCreateSheet: View {
             }
             .alert("启用 R18 增强？", isPresented: $showR18Notice) {
                 Button("同意并开启") {
-                    r18NoticeConfirmed = true
-                    r18Enabled = true
+                    // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
+                    DispatchQueue.main.async {
+                        r18NoticeConfirmed = true
+                        r18Enabled = true
+                    }
                 }
                 Button("取消", role: .cancel) {}
             } message: {

@@ -104,26 +104,24 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .background(devUnlockLink)
         .alert("开发者功能", isPresented: $showDevWarning) {
-            Button("我已知晓风险，继续") { devUnlocked = true }
+            Button("我已知晓风险，继续") {
+                // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
+                DispatchQueue.main.async { devUnlocked = true }
+            }
             Button("取消", role: .cancel) {}
         } message: {
             Text("除非您具备清晰的提示词编写经验，否则请勿擅自修改此处内容，错误改动可能导致生成效果严重下降。")
         }
     }
 
-    /// 确认后推入开发者面板（iOS 15 隐藏 NavigationLink 方案）
+    /// 确认后推入开发者面板。
+    /// 注意：链接必须常驻视图树（不能用 if 包裹），确认时只翻转 isActive——
+    /// iOS 15 下「链接随状态翻转同时插入」不会触发导航，这是此前确认后进不去的根因之一。
     private var devUnlockLink: some View {
-        Group {
-            if devUnlocked {
-                NavigationLink(
-                    destination: DeveloperPanelView(),
-                    isActive: Binding(
-                        get: { devUnlocked },
-                        set: { if !$0 { devUnlocked = false } }
-                    )
-                ) { EmptyView() }
-                .hidden()
-            }
-        }
+        NavigationLink(
+            destination: DeveloperPanelView(),
+            isActive: $devUnlocked
+        ) { EmptyView() }
+        .hidden()
     }
 }
