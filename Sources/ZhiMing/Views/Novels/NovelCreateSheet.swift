@@ -25,24 +25,10 @@ struct NovelCreateSheet: View {
     @State private var previewTag: PromptTag?
     @ObservedObject private var library = PromptLibrary.shared
 
-    // R18 增强（两种建书方式共用；开启需首次确认免责说明）
+    // R18 增强（两种建书方式共用；开启需首次确认免责说明，内联卡片确认）
     @State private var r18Enabled = false
     @AppStorage("r18.notice.confirmed.v1") private var r18NoticeConfirmed = false
     @State private var showR18Notice = false
-
-    /// 开启时若未确认过免责说明，先弹确认框
-    private var r18Binding: Binding<Bool> {
-        Binding(
-            get: { r18Enabled },
-            set: { newValue in
-                if newValue && !r18NoticeConfirmed {
-                    showR18Notice = true
-                } else {
-                    r18Enabled = newValue
-                }
-            }
-        )
-    }
 
     private let perspectiveOptions = ["", "第一人称", "第三人称限知", "第三人称全知", "多视角交替"]
 
@@ -61,18 +47,6 @@ struct NovelCreateSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
-            }
-            .alert("启用 R18 增强？", isPresented: $showR18Notice) {
-                Button("同意并开启") {
-                    // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
-                    DispatchQueue.main.async {
-                        r18NoticeConfirmed = true
-                        r18Enabled = true
-                    }
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("说明：此功能仅为合规的 R18 写作提示词注入，用于增强小说文采与场景表现力，并非「破甲」或「越狱」提示词。\n\n提醒：如需更高级别的 R18 内容生成，请自行配置相应模型或 API 权限，本功能不涉及任何绕过模型安全策略的操作。\n\n免责声明：生成的所有内容均由您自行负责，与本应用开发者及运营方无关。")
             }
         }
     }
@@ -182,6 +156,9 @@ struct NovelCreateSheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                if showR18Notice {
+                    r18ConfirmCard()
+                }
             }
             Section {
                 Button("创建作品") { createBlank() }
@@ -228,6 +205,21 @@ struct NovelCreateSheet: View {
 
             tagLibrarySection
 
+            // R18 开关 + 内联确认（一句话立项）
+            VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+                Toggle(isOn: r18Binding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("R18 增强（虚构情色写作辅助）").font(.subheadline)
+                        Text(r18Enabled ? "已开启：注入本地打包的 R18 写作规范（按语言二选一），强调色锁定血红" : "为本书开启成人向写作规范注入")
+                            .font(.caption2)
+                            .foregroundStyle(r18Enabled ? Color.red : .secondary)
+                    }
+                }
+                if showR18Notice {
+                    r18ConfirmCard()
+                }
+            }
+
             Button {
                 createFromBrief()
             } label: {
@@ -270,18 +262,43 @@ struct NovelCreateSheet: View {
                 Text("点击标签预览完整内容；打开「启用」后，只有当你的创意中包含该标签的关键词时才会注入对应指导。未启用的标签永不注入。")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-
-                Toggle(isOn: r18Binding) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("R18 增强（虚构情色写作辅助）").font(.subheadline)
-                        Text(r18Enabled ? "已开启：注入本地打包的 R18 写作规范（按语言二选一），强调色锁定血红" : "为本书开启成人向写作规范注入")
-                            .font(.caption2)
-                            .foregroundStyle(r18Enabled ? Color.red : .secondary)
-                    }
-                }
             }
         }
         .frame(maxHeight: 210)
+    }
+
+    // MARK: R18 内联确认（不用系统弹窗：部分系统版本 alert 按钮动作不可靠）
+
+    /// 开关联动：未确认过时第一次打开开关只展开内联警示，不真正开启
+    private var r18Binding: Binding<Bool> {
+        Binding(
+            get: { r18Enabled },
+            set: { newValue in
+                if newValue && !r18NoticeConfirmed {
+                    withAnimation { showR18Notice = true }
+                } else {
+                    r18Enabled = newValue
+                    if !newValue { withAnimation { showR18Notice = false } }
+                }
+            }
+        )
+    }
+
+    /// 空白表单 / 一句话立项 共用的确认卡
+    private func r18ConfirmCard() -> some View {
+        InlineConfirmCard(
+            title: "启用 R18 增强？",
+            message: Novel.r18NoticeText,
+            confirmLabel: "同意并开启",
+            onConfirm: {
+                r18NoticeConfirmed = true
+                withAnimation {
+                    r18Enabled = true
+                    showR18Notice = false
+                }
+            },
+            onCancel: { withAnimation { showR18Notice = false } }
+        )
     }
 
     private func tagChip(_ tag: PromptTag) -> some View {

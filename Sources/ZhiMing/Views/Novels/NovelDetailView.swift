@@ -157,19 +157,22 @@ private struct NovelSettingsTab: View {
                             .foregroundStyle(novel.r18Enabled ? Color.red : .secondary)
                     }
                 }
-            }
-        }
-        .alert("启用 R18 增强？", isPresented: $showR18Notice) {
-            Button("同意并开启") {
-                // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
-                DispatchQueue.main.async {
-                    r18NoticeConfirmed = true
-                    applyR18(true)
+                if showR18Notice {
+                    InlineConfirmCard(
+                        title: "启用 R18 增强？",
+                        message: Novel.r18NoticeText,
+                        confirmLabel: "同意并开启",
+                        onConfirm: {
+                            r18NoticeConfirmed = true
+                            withAnimation {
+                                applyR18(true)
+                                showR18Notice = false
+                            }
+                        },
+                        onCancel: { withAnimation { showR18Notice = false } }
+                    )
                 }
             }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("说明：此功能仅为合规的 R18 写作提示词注入，用于增强小说文采与场景表现力，并非「破甲」或「越狱」提示词。\n\n提醒：如需更高级别的 R18 内容生成，请自行配置相应模型或 API 权限，本功能不涉及任何绕过模型安全策略的操作。\n\n免责声明：生成的所有内容均由您自行负责，与本应用开发者及运营方无关。")
         }
     }
 }

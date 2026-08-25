@@ -95,6 +95,8 @@ final class Novel: Identifiable, ObservableObject, Codable {
 extension Novel {
     /// R18 作品的强制强调色（血红色），开启期间不可修改
     static let r18AccentHex = "#CC0000"
+    /// R18 免责说明三段文案（内联确认卡共用）
+    static let r18NoticeText = "说明：此功能仅为合规的 R18 写作提示词注入，用于增强小说文采与场景表现力，并非「破甲」或「越狱」提示词。\n提醒：如需更高级别的 R18 内容生成，请自行配置相应模型或 API 权限，本功能不涉及任何绕过模型安全策略的操作。\n免责声明：生成的所有内容均由您自行负责，与本应用开发者及运营方无关。"
 }
 
 final class Volume: Identifiable, ObservableObject, Codable {

@@ -117,12 +117,27 @@ struct PromptEditView: View {
                     .font(.callout)
             }
             Section {
-                Button(role: .destructive) {
-                    showResetConfirm = true
-                } label: {
-                    Label("恢复出厂默认", systemImage: "arrow.counterclockwise")
+                if showResetConfirm {
+                    // 内联两步确认（不用系统弹窗：部分系统版本 alert 按钮动作不可靠）
+                    Text("将丢弃该提示词的全部自定义内容，恢复为出厂版本。")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                    Button(role: .destructive) {
+                        library.resetOverride(prompt.id)
+                        text = prompt.defaultText
+                        showResetConfirm = false
+                    } label: {
+                        Label("确认恢复出厂默认", systemImage: "arrow.counterclockwise")
+                    }
+                    Button("取消") { showResetConfirm = false }
+                } else {
+                    Button(role: .destructive) {
+                        showResetConfirm = true
+                    } label: {
+                        Label("恢复出厂默认", systemImage: "arrow.counterclockwise")
+                    }
+                    .disabled(!library.isCustomized(prompt.id) && !isModified)
                 }
-                .disabled(!library.isCustomized(prompt.id) && !isModified)
             } footer: {
                 Text("恢复操作会丢弃你的全部自定义内容。")
             }
@@ -145,18 +160,6 @@ struct PromptEditView: View {
             guard !loaded else { return }
             loaded = true
             text = library.resolvedText(for: prompt.id)
-        }
-        .alert("恢复出厂默认？", isPresented: $showResetConfirm) {
-            Button("恢复", role: .destructive) {
-                // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
-                DispatchQueue.main.async {
-                    library.resetOverride(prompt.id)
-                    text = prompt.defaultText
-                }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("将丢弃该提示词的自定义内容，恢复为出厂版本。")
         }
     }
 
@@ -205,10 +208,26 @@ struct TagEditView: View {
             }
             if existingTag != nil {
                 Section {
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("删除该标签", systemImage: "trash")
+                    if showDeleteConfirm {
+                        // 内联两步确认（不用系统弹窗：部分系统版本 alert 按钮动作不可靠）
+                        Text("「\(existingTag?.name ?? "")」将从分类中移除；已启用它的旧作品不再注入其内容。")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                        Button(role: .destructive) {
+                            if let tag = existingTag {
+                                library.deleteTag(tag, categoryId: categoryId)
+                            }
+                            dismiss()
+                        } label: {
+                            Label("确认删除", systemImage: "trash")
+                        }
+                        Button("取消") { showDeleteConfirm = false }
+                    } else {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("删除该标签", systemImage: "trash")
+                        }
                     }
                 }
             }
@@ -231,20 +250,6 @@ struct TagEditView: View {
             name = tag.name
             keywordsText = tag.keywords.joined(separator: "，")
             presetText = tag.presetText
-        }
-        .alert("删除标签？", isPresented: $showDeleteConfirm) {
-            Button("删除", role: .destructive) {
-                // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
-                DispatchQueue.main.async {
-                    if let tag = existingTag {
-                        library.deleteTag(tag, categoryId: categoryId)
-                    }
-                    dismiss()
-                }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("「\(existingTag?.name ?? "")」将从分类中移除；已启用它的旧作品不再注入其内容。")
         }
     }
 

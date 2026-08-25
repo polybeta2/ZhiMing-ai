@@ -181,3 +181,40 @@ struct CompatNavigationView<Content: View>: View {
         }
     }
 }
+
+// MARK: - 内联确认卡（替代系统弹窗）
+// 部分系统版本上 .alert 的按钮 action 闭包不可靠（确认后状态写入被丢弃，
+// 表现为「确认没反应、再点又弹窗」），关键确认一律改用普通视图按钮。
+
+struct InlineConfirmCard: View {
+    let title: String
+    let message: String
+    let confirmLabel: String
+    let onConfirm: () -> Void
+    var onCancel: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.spacing[2]) {
+            Text(title)
+                .font(.subheadline.bold())
+                .foregroundColor(.red)
+            Text(message)
+                .font(.caption)
+                .foregroundColor(.red)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if let onCancel {
+                    Button("取消", action: onCancel)
+                        .buttonStyle(.bordered)
+                }
+                Spacer()
+                Button(action: onConfirm) {
+                    Text(confirmLabel).frame(minWidth: 88)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+}

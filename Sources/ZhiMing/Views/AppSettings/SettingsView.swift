@@ -51,20 +51,37 @@ struct SettingsView: View {
                 }
             }
 
-            Section("开发者功能") {
+            Section(footer: Text(showDevWarning
+                                 ? "再次提醒：错误改动内置提示词可能导致生成效果严重下降。点击上方条目确认进入，或点「取消」返回。"
+                                 : "内置提示词编辑与示例标签库管理，修改保存后立即生效。")) {
+                // 两步点击确认（不用系统弹窗：部分系统版本 alert 按钮动作不可靠）
                 Button {
-                    showDevWarning = true
+                    if showDevWarning {
+                        showDevWarning = false
+                        devUnlocked = true
+                    } else {
+                        withAnimation { showDevWarning = true }
+                    }
                 } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("开发者功能")
-                            Text("内置提示词编辑与示例标签库管理")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
+                    HStack(spacing: AppTheme.spacing[2]) {
                         Image(systemName: "wrench.and.screwdriver")
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(showDevWarning ? Color.red : Color.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(showDevWarning ? "⚠️ 再次点击，确认进入开发者功能" : "开发者功能")
+                                .foregroundColor(showDevWarning ? .red : nil)
+                            Text(showDevWarning
+                                 ? "除非您具备清晰的提示词编写经验，否则请勿擅自修改此处内容，错误改动可能导致生成效果严重下降。"
+                                 : "内置提示词编辑与示例标签库管理")
+                                .font(.caption)
+                                .foregroundStyle(showDevWarning ? Color.red : .secondary)
+                                .lineLimit(4)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                }
+                if showDevWarning {
+                    Button("取消") {
+                        withAnimation { showDevWarning = false }
                     }
                 }
             }
@@ -103,15 +120,6 @@ struct SettingsView: View {
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
         .background(devUnlockLink)
-        .alert("开发者功能", isPresented: $showDevWarning) {
-            Button("我已知晓风险，继续") {
-                // iOS 15：alert action 闭包内的状态写入可能被丢弃，延迟到下一主队列周期
-                DispatchQueue.main.async { devUnlocked = true }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("除非您具备清晰的提示词编写经验，否则请勿擅自修改此处内容，错误改动可能导致生成效果严重下降。")
-        }
     }
 
     /// 确认后推入开发者面板。
