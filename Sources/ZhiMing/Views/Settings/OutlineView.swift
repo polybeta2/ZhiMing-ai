@@ -9,6 +9,7 @@ struct OutlineView: View {
 
     var body: some View {
         List {
+            ForeshadowDashboardSection(store: store, novel: novel)
             if novel.volumes.isEmpty {
                 Section {
                     Text("还没有卷。点击右上角 + 新建卷，再在卷下管理章节。")
@@ -706,5 +707,168 @@ private struct FourDimsEditor: View {
             guard !Task.isCancelled else { return }
             store.save()
         }
+    }
+}
+
+/// 伏笔台账：AI 自动提取的伏笔加手动新增，统一在此管理状态与回收
+private struct ForeshadowDashboardSection: View {
+    @ObservedObject var store: AppStore
+    @ObservedObject var novel: Novel
+
+    @State private var expanded = false
+    @State private var editing: Foreshadowing?
+    @State private var showAdd = false
+    @State private var deleting: Foreshadowing?
+
+    /// 未回收数量
+    private var openCount: Int {
+        novel.foreshadowings.filter { $0.status == .open }.count
+    }
+
+    /// 按状态排序（未回收→已回收→废弃），同级按埋设位置
+    private var sorted: [Foreshadowing] {
+        novel.foreshadowings.sorted {
+            $0.statusSortRank != $1.statusSortRank
+                ? $0.statusSortRank < $1.statusSortRank
+                : ($0.plantedVolumeIndex ?? 0, $0.plantedChapterOrder ?? 0) < ($1.plantedVolumeIndex ?? 0, $1.plantedChapterOrder ?? 0)
+        }
+    }
+
+    var body: some View {
+        Section {
+            if novel.foreshadowings.isEmpty {
+                Text("暂无伏笔记录。AI 会在生成章节摘要时自动提取新伏笔，你也可以手动添加。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(sorted) { foreshadowing in
+                    row(for: foreshadowing)
+                }
+                Button {
+                    showAdd = true
+                } label: {
+                    Label("手动新增伏笔", systemImage: "plus.circle").font(.footnote)
+                }
+            }
+        } header: {
+            Button {
+                withAnimation { expanded.toggle() }
+            } label: {
+                HStack {
+                    Label("伏笔台账", systemImage: "eye").font(.footnote)
+                    Spacer()
+                    if openCount > 0 {
+                        Text("\(openCount) 未回收")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .sheet(isPresented: $showAdd) {
+            ForeshadowEditSheet(novel: novel)
+        }
+        .sheet(item: $editing) { item in
+            ForeshadowEditSheet(novel: novel, existing: item)
+        }
+    }
+
+    /// 单条伏笔行
+    private func row(for foreshadowing: Foreshadowing) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                if foreshadowing.suggestedResolved && foreshadowing.status == .open {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 8, height: 8)
+                }
+                Text(foreshadowing.title)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Spacer()
+                Text(foreshadowing.status.displayName)
+                    .font(.caption2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(foreshadowing.status.tintColor.opacity(0.15), in: Capsule())
+                    .foregroundStyle(foreshadowing.status.tintColor)
+            }
+            HStack {
+                Text(positionText(for: foreshadowing))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let planned = foreshadowing.plannedResolve, !planned.isEmpty {
+                    Text("计划回收：\(planned)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            if deleting?.id == foreshadowing.id {
+                InlineConfirmCard(
+                    title: "删除「\(foreshadowing.title)」？",
+                    message: "此伏笔记录将被永久移除，无法恢复。",
+                    confirmLabel: "确认删除",
+                    onConfirm: {
+                        novel.foreshadowings.removeAll { $0.id == foreshadowing.id }
+                        deleting = nil
+                        store.save()
+                    },
+                    onCancel: { deleting = nil }
+                )
+            }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { editing = foreshadowing }
+        // 普通视图 + 直接挂 contextMenu，避开 Button+contextMenu 在 iOS 15 的菜单错配
+        .contextMenu {
+            Button {
+                editing = foreshadowing
+            } label: {
+                Label("编辑", systemImage: "pencil")
+            }
+            if foreshadowing.status != .resolved {
+                Button {
+                    flip(foreshadowing, to: .resolved)
+                } label: {
+                    Label("标记为已回收", systemImage: "checkmark.circle")
+                }
+            }
+            if foreshadowing.status != .dropped {
+                Button {
+                    flip(foreshadowing, to: .dropped)
+                } label: {
+                    Label("废弃此伏笔", systemImage: "trash.slash")
+                }
+            }
+            Divider()
+            Button(role: .destructive) {
+                deleting = foreshadowing
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
+    }
+
+    /// 快速切换状态
+    private func flip(_ f: Foreshadowing, to newStatus: ForeshadowStatus) {
+        guard let index = novel.foreshadowings.firstIndex(where: { $0.id == f.id }) else { return }
+        novel.foreshadowings[index].status = newStatus
+        novel.foreshadowings[index].suggestedResolved = false
+        store.save()
+    }
+
+    /// 埋设位置文本
+    private func positionText(for f: Foreshadowing) -> String {
+        if let v = f.plantedVolumeIndex, let c = f.plantedChapterOrder {
+            return "第\(v)卷第\(c)章"
+        }
+        return "位置未知"
     }
 }
