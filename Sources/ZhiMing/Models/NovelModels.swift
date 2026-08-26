@@ -25,6 +25,11 @@ final class Novel: Identifiable, ObservableObject, Codable {
     @Published var characters: [CharacterCard] = []
     @Published var worldEntries: [WorldEntry] = []
     @Published var chatThreads: [ChatThread] = []
+    @Published var foreshadowings: [Foreshadowing] = []
+    /// 统计基线：最近一次记录起点字数的日期（仅到天）
+    @Published var lastStatsDate: Date?
+    /// 统计基线：当天起点总字数（今日新增 = 当前总字数 - 该值）
+    @Published var lastTotalWordCount: Int = 0
 
     init(id: UUID = UUID(), title: String, synopsis: String = "") {
         self.id = id
@@ -40,6 +45,7 @@ final class Novel: Identifiable, ObservableObject, Codable {
         case id, title, synopsis, genre, perspective, styleGuide
         case accentColorHex, enabledTagIDs, r18Enabled, createdAt, updatedAt
         case volumes, characters, worldEntries, chatThreads
+        case foreshadowings, lastStatsDate, lastTotalWordCount
     }
 
     required init(from decoder: Decoder) throws {
@@ -59,6 +65,9 @@ final class Novel: Identifiable, ObservableObject, Codable {
         characters = try c.decode([CharacterCard].self, forKey: .characters)
         worldEntries = try c.decode([WorldEntry].self, forKey: .worldEntries)
         chatThreads = try c.decode([ChatThread].self, forKey: .chatThreads)
+        foreshadowings = try c.decodeIfPresent([Foreshadowing].self, forKey: .foreshadowings) ?? []
+        lastStatsDate = try c.decodeIfPresent(Date.self, forKey: .lastStatsDate)
+        lastTotalWordCount = try c.decodeIfPresent(Int.self, forKey: .lastTotalWordCount) ?? 0
         for v in volumes {
             v.novel = self
             for ch in v.chapters {
@@ -89,6 +98,9 @@ final class Novel: Identifiable, ObservableObject, Codable {
         try c.encode(characters, forKey: .characters)
         try c.encode(worldEntries, forKey: .worldEntries)
         try c.encode(chatThreads, forKey: .chatThreads)
+        try c.encode(foreshadowings, forKey: .foreshadowings)
+        try c.encodeIfPresent(lastStatsDate, forKey: .lastStatsDate)
+        try c.encode(lastTotalWordCount, forKey: .lastTotalWordCount)
     }
 }
 
@@ -147,6 +159,43 @@ struct InfoGap: Codable, Equatable {
     init(start: String = "", end: String = "") {
         self.start = start
         self.end = end
+    }
+}
+
+// MARK: - 伏笔台账（v1.9）
+// 跨章跨卷的悬念追踪：摘要建档时 AI 提取新伏笔静默入库，续写时注入临近回收提醒。
+
+enum ForeshadowStatus: String, Codable {
+    case open       // 未回收
+    case resolved   // 已回收
+    case dropped    // 废弃（作者主动放弃此线）
+}
+
+struct Foreshadowing: Identifiable, Codable, Equatable {
+    let id: UUID
+    var title: String
+    var detail: String?
+    var plantedVolumeIndex: Int?    // 埋设卷序（1-based）
+    var plantedChapterOrder: Int?   // 埋设章序（卷内，1-based）
+    var plannedResolve: String?     // 计划回收位置（自由文本）
+    var status: ForeshadowStatus
+    var note: String?
+    /// 摘要提取时标记：LLM 认为本章已回收此条，待作者确认（不自动翻转 status）
+    var suggestedResolved: Bool = false
+
+    init(id: UUID = UUID(), title: String, detail: String? = nil,
+         plantedVolumeIndex: Int? = nil, plantedChapterOrder: Int? = nil,
+         plannedResolve: String? = nil, status: ForeshadowStatus = .open,
+         note: String? = nil, suggestedResolved: Bool = false) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.plantedVolumeIndex = plantedVolumeIndex
+        self.plantedChapterOrder = plantedChapterOrder
+        self.plannedResolve = plannedResolve
+        self.status = status
+        self.note = note
+        self.suggestedResolved = suggestedResolved
     }
 }
 
