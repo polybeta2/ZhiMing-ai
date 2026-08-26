@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 作品工作台：章节 / 设定 / 助手 三页签
+/// 作品工作台：章节 / 设定 / 统计 / 助手 四页签 + 工具栏导出入口
 struct NovelDetailView: View {
     @EnvironmentObject private var store: AppStore
     @ObservedObject var novel: Novel
@@ -9,10 +9,12 @@ struct NovelDetailView: View {
         case chapters = "章节"
         case settings = "设定"
         case assistant = "助手"
+        case stats = "统计"
         var id: String { rawValue }
     }
 
     @State private var tab: Tab = .chapters
+    @State private var showExport = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,10 +34,22 @@ struct NovelDetailView: View {
                 NovelSettingsTab(novel: novel)
             case .assistant:
                 AssistantPane(novel: novel)
+            case .stats:
+                StatisticsView(novel: novel)
             }
         }
         .navigationTitle(novel.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showExport = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+            }
+        }
+        .sheet(isPresented: $showExport) { ExportSheet(novel: novel) }
         // 一句话立项未完成时直接落到助手页签（立项对话）
         .onAppear {
             if novel.hasPendingCreationThread { tab = .assistant }
