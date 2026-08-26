@@ -7,8 +7,11 @@
 ## ✨ 功能
 
 - **作品管理**：作品卡片列表、空白建书 / 一句话立项两种入口
-- **立项对话流**：一句话创意 → AI 生成可编辑蓝图（主题/梗概/角色/世界观/卷纲章纲）→ 对话修订 → 一键落库为正式作品
+- **立项对话流**：一句话创意 → AI 生成可编辑蓝图（主题/梗概/角色/世界观/卷纲章纲 + 四维结构/场景卡）→ 对话修订 → 一键落库为正式作品
 - **设定管理**：角色卡（含「当前状态列」：目标/位置/身体/心理/最近出场 + 剧情参与开关）、世界观条目（分类管理）、卷纲与章细纲
+- **蓝图四维结构**：情绪走向 / 冲突阶梯 / 信息差 / 场景卡（goal-obstacle-hook），随蓝图生成，大纲页可视化编辑
+- **AI 辅助大纲**：卷纲 / 章细纲流式生成草稿（支持附加要求、对齐最近正文走向）；卷纲可同步更新四维（zm-dims），细纲可同步场景卡（zm-scene）
+- **写作助手双模式**：只读（仅建议）/ 读写——助手以 zm-patch 提案修改设定（角色增改、世界观 upsert、**卷/章重命名、场景卡增删改**、梗概更新），确认卡逐项列出、应用后才落盘
 - **章节编辑器**：沉浸正文编辑、字数统计、防抖保存
 - **AI 写作**：续写（800/1500/2500 字快捷档）/ 改写 / 润色，SSE 流式输出、随时停止；草稿卡片支持采纳 / 重新生成 / 放弃
 - **上下文装配**：三级装配（必需层：风格约束+细纲+正文末尾 800 字；高优先层：最近 3 章摘要+关键事实；可选层：场景角色卡+世界观），字符预算控制，超预算裁剪有提示
@@ -33,8 +36,8 @@
 Sources/ZhiMing/
 ├─ App/          # 入口 + 设计令牌（AppTheme）
 ├─ Models/       # Novel/Volume/Chapter/ChapterSummary/ChapterSnapshot/CharacterCard/WorldEntry/ChatThread/ChatMessage/ProviderConfig + SeedData
-├─ Services/     # AppStore(持久层) Keychain LLMClient OpenAICompatibleClient ContextBuilder PromptTemplates PromptLibrary PromptGuard(体量护栏) ProseChecker SnapshotService
-├─ ViewModels/   # WritingSessionViewModel(写作) CreationSessionViewModel(立项状态机)
+├─ Services/     # AppStore(持久层) Keychain LLMClient OpenAICompatibleClient ContextBuilder PromptTemplates PromptLibrary PromptGuard(体量护栏) ProseChecker AssistantPatch(助手补丁) SnapshotService
+├─ ViewModels/   # WritingSessionViewModel(写作) CreationSessionViewModel(立项状态机) OutlineAssistViewModel(大纲辅助)
 └─ Views/        # Novels / Chat / Editor / Settings / AppSettings
 ```
 

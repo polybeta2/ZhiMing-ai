@@ -9,7 +9,8 @@ enum AssistantAccessMode: String {
 /// 写作助手「读写模式」的设定补丁协议：
 /// 模型在回复末尾输出 ```zm-patch 围栏 JSON，本类型负责提取/描述/应用。
 /// 模型本身没有直接写权——apply(to:store:) 只会由用户在确认卡上点「应用」触发。
-/// v1 范围：角色增改、世界观增改、梗概/视角/风格更新；不支持删除操作。
+/// 范围：角色增改、世界观增改、梗概/视角/风格更新、卷/章重命名、章节场景卡增删改；
+/// 仍不支持删除角色/世界观/卷/章本体。
 struct AssistantPatch: Codable {
     struct CharacterUpdate: Codable {
         let find: String
@@ -40,11 +41,46 @@ struct AssistantPatch: Codable {
         var styleGuide: String?
     }
 
+    /// 重命名指令（卷/章共用）：find=现有名称（卷支持「第N卷」），to=新名称
+    struct NameRename: Codable {
+        var find: String
+        var to: String
+    }
+
+    /// 场景卡字段 DTO：全可选，便于模型省略空字段
+    struct SceneCardDTO: Codable {
+        var index: Int?
+        var goal: String?
+        var obstacle: String?
+        var hook: String?
+
+        /// 转换为实体卡；三字段全空视为无效
+        var asCard: SceneCard? {
+            let g = (goal ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let o = (obstacle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let h = (hook ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if g.isEmpty && o.isEmpty && h.isEmpty { return nil }
+            return SceneCard(goal: g, obstacle: o, hook: h)
+        }
+    }
+
+    /// 单章场景卡操作组：replace 与 update/add/remove 互斥（replace 优先）
+    struct SceneCardsOp: Codable {
+        var chapter: String
+        var replace: [SceneCardDTO]?
+        var update: [SceneCardDTO]?
+        var add: [SceneCardDTO]?
+        var remove: [Int]?
+    }
+
     var summary: String?
     var character_updates: [CharacterUpdate]?
     var character_adds: [CharacterAdd]?
     var world_upserts: [WorldUpsert]?
     var novel_updates: NovelUpdates?
+    var volume_renames: [NameRename]?
+    var chapter_renames: [NameRename]?
+    var scene_cards: [SceneCardsOp]?
 
     // MARK: - 提取
 
@@ -68,6 +104,9 @@ struct AssistantPatch: Codable {
             && (patch.character_adds?.isEmpty ?? true)
             && (patch.world_upserts?.isEmpty ?? true)
             && patch.novel_updates == nil
+            && (patch.volume_renames?.isEmpty ?? true)
+            && (patch.chapter_renames?.isEmpty ?? true)
+            && (patch.scene_cards?.isEmpty ?? true)
     }
 
     /// 扫描 ``` 围栏：跳过语言标记行后能解码为补丁的第一个块
@@ -102,9 +141,60 @@ struct AssistantPatch: Codable {
         return try? JSONDecoder().decode(AssistantPatch.self, from: data)
     }
 
+    // MARK: - 定位
+
+    /// 角色定位：精确名/别名 → 双向包含匹配
+    static func matchCharacter(_ query: String, in novel: Novel) -> CharacterCard? {
+        let keyword = query.trimmingCharacters(in: .whitespaces)
+        guard !keyword.isEmpty else { return nil }
+        if let exact = novel.characters.first(where: { $0.name == keyword || $0.aliases.contains(keyword) }) {
+            return exact
+        }
+        return novel.characters.first { $0.name.contains(keyword) || keyword.contains($0.name) }
+    }
+
+    /// 卷定位：精确名 → 「第N卷」序号 → 双向包含
+    static func matchVolume(_ query: String, in novel: Novel) -> Volume? {
+        let keyword = query.trimmingCharacters(in: .whitespaces)
+        guard !keyword.isEmpty else { return nil }
+        if let exact = novel.volumes.first(where: { $0.name == keyword }) { return exact }
+        if let order = volumeNumber(in: keyword),
+           let byOrder = novel.sortedVolumes.first(where: { $0.sortOrder == order }) {
+            return byOrder
+        }
+        return novel.volumes.first { $0.name.contains(keyword) || keyword.contains($0.name) }
+    }
+
+    /// 解析「第N卷」中的 N
+    private static func volumeNumber(in text: String) -> Int? {
+        guard let open = text.range(of: "第"),
+              let close = text.range(of: "卷", range: open.upperBound..<text.endIndex) else { return nil }
+        let digits = text[open.upperBound..<close.lowerBound].trimmingCharacters(in: .whitespaces)
+        return Int(digits)
+    }
+
+    /// 章定位：支持「卷名/章题」消歧 → 全书精确题名 → 双向包含
+    static func matchChapter(_ query: String, in novel: Novel) -> Chapter? {
+        let keyword = query.trimmingCharacters(in: .whitespaces)
+        guard !keyword.isEmpty else { return nil }
+
+        let candidates: [Chapter]
+        var titleKey = keyword
+        if keyword.contains("/") {
+            let parts = keyword.split(separator: "/", maxSplits: 1).map(String.init)
+            let volumeKey = parts[0].trimmingCharacters(in: .whitespaces)
+            titleKey = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
+            candidates = matchVolume(volumeKey, in: novel)?.sortedChapters ?? novel.allChaptersInOrder
+        } else {
+            candidates = novel.allChaptersInOrder
+        }
+        if let exact = candidates.first(where: { $0.title == titleKey }) { return exact }
+        return candidates.first { $0.title.contains(titleKey) || titleKey.contains($0.title) }
+    }
+
     // MARK: - 变更清单（确认卡展示）
 
-    /// 人可读的拟议变更行；找不到目标角色的条目也会列出并标注将跳过
+    /// 人可读的拟议变更行；找不到目标的条目也会列出并标注将跳过
     func describe(novel: Novel) -> [String] {
         var lines: [String] = []
         for update in character_updates ?? [] {
@@ -125,6 +215,38 @@ struct AssistantPatch: Codable {
             let exists = novel.worldEntries.contains { $0.name == name }
             lines.append("\(exists ? "更新" : "新增")世界观「\(name)」")
         }
+        for rename in volume_renames ?? [] {
+            let to = rename.to.trimmingCharacters(in: .whitespaces)
+            guard !to.isEmpty else { continue }
+            if let target = Self.matchVolume(rename.find, in: novel) {
+                lines.append("卷「\(target.name)」重命名为「\(to)」")
+            } else {
+                lines.append("⚠️ 未找到卷「\(rename.find)」（应用时将跳过）")
+            }
+        }
+        for rename in chapter_renames ?? [] {
+            let to = rename.to.trimmingCharacters(in: .whitespaces)
+            guard !to.isEmpty else { continue }
+            if let target = Self.matchChapter(rename.find, in: novel) {
+                lines.append("章节「\(target.title)」重命名为「\(to)」")
+            } else {
+                lines.append("⚠️ 未找到章节「\(rename.find)」（应用时将跳过）")
+            }
+        }
+        for op in scene_cards ?? [] {
+            guard let chapter = Self.matchChapter(op.chapter, in: novel) else {
+                lines.append("⚠️ 未找到章节「\(op.chapter)」（场景卡变更将跳过）")
+                continue
+            }
+            var parts: [String] = []
+            if !(op.replace ?? []).isEmpty { parts.append("整组替换 \((op.replace ?? []).count) 张") }
+            if let updates = op.update, !updates.isEmpty { parts.append("更新 \(updates.count) 处") }
+            if let adds = op.add, !adds.isEmpty { parts.append("新增 \(adds.count) 张") }
+            if let removes = op.remove, !removes.isEmpty { parts.append("删除 \(removes.count) 张") }
+            if !parts.isEmpty {
+                lines.append("《\(chapter.title)》场景卡：\(parts.joined(separator: "、"))")
+            }
+        }
         if let updates = novel_updates {
             if let value = updates.synopsis?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
                 lines.append("更新作品梗概")
@@ -137,16 +259,6 @@ struct AssistantPatch: Codable {
             }
         }
         return lines
-    }
-
-    /// 角色定位：精确名/别名 → 双向包含匹配
-    static func matchCharacter(_ query: String, in novel: Novel) -> CharacterCard? {
-        let keyword = query.trimmingCharacters(in: .whitespaces)
-        guard !keyword.isEmpty else { return nil }
-        if let exact = novel.characters.first(where: { $0.name == keyword || $0.aliases.contains(keyword) }) {
-            return exact
-        }
-        return novel.characters.first { $0.name.contains(keyword) || keyword.contains($0.name) }
     }
 
     // MARK: - 应用
@@ -203,6 +315,73 @@ struct AssistantPatch: Codable {
                 novel.worldEntries.append(entry)
                 results.append("✅ 新增世界观「\(name)」")
             }
+        }
+
+        for rename in volume_renames ?? [] {
+            let to = rename.to.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !to.isEmpty else { continue }
+            guard let target = Self.matchVolume(rename.find, in: novel) else {
+                results.append("⚠️ 未找到卷「\(rename.find)」，已跳过")
+                continue
+            }
+            let old = target.name
+            target.name = to
+            results.append("✅ 卷「\(old)」→「\(to)」")
+        }
+
+        for rename in chapter_renames ?? [] {
+            let to = rename.to.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !to.isEmpty else { continue }
+            guard let target = Self.matchChapter(rename.find, in: novel) else {
+                results.append("⚠️ 未找到章节「\(rename.find)」，已跳过")
+                continue
+            }
+            let old = target.title
+            target.title = to
+            results.append("✅ 章节「\(old)」→「\(to)」")
+        }
+
+        for op in scene_cards ?? [] {
+            guard let chapter = Self.matchChapter(op.chapter, in: novel) else {
+                results.append("⚠️ 未找到章节「\(op.chapter)」，场景卡变更已跳过")
+                continue
+            }
+            var cards = chapter.sceneCards ?? []
+            var actions: [String] = []
+
+            if let replace = op.replace, !replace.isEmpty {
+                cards = replace.compactMap(\.asCard)
+                actions.append("整组替换为 \(cards.count) 张")
+            } else {
+                if let updates = op.update, !updates.isEmpty {
+                    var touched = 0
+                    for dto in updates {
+                        guard let index = dto.index, cards.indices.contains(index - 1) else { continue }
+                        var card = cards[index - 1]
+                        if let g = dto.goal?.trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty { card.goal = g }
+                        if let o = dto.obstacle?.trimmingCharacters(in: .whitespacesAndNewlines), !o.isEmpty { card.obstacle = o }
+                        if let hk = dto.hook?.trimmingCharacters(in: .whitespacesAndNewlines), !hk.isEmpty { card.hook = hk }
+                        cards[index - 1] = card
+                        touched += 1
+                    }
+                    if touched > 0 { actions.append("更新 \(touched) 处") }
+                }
+                if let removes = op.remove, !removes.isEmpty {
+                    let valid = removes.filter { cards.indices.contains($0 - 1) }.sorted(by: >)
+                    for index in valid { cards.remove(at: index - 1) }
+                    if !valid.isEmpty { actions.append("删除 \(valid.count) 张") }
+                }
+                if let adds = op.add, !adds.isEmpty {
+                    let newCards = adds.compactMap(\.asCard)
+                    cards += newCards
+                    if !newCards.isEmpty { actions.append("新增 \(newCards.count) 张") }
+                }
+            }
+
+            chapter.sceneCards = cards.isEmpty ? nil : cards
+            results.append(actions.isEmpty
+                ? "⚠️ 《\(chapter.title)》场景卡无可执行变更"
+                : "✅ 《\(chapter.title)》场景卡：\(actions.joined(separator: "、"))")
         }
 
         if let updates = novel_updates {

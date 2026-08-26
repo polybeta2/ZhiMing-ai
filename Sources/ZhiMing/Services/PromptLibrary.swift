@@ -524,8 +524,14 @@ final class PromptLibrary: ObservableObject {
                 3. 围栏内是严格 JSON，所有字段均可省略，结构如下：
                 {"summary":"本次改动一句话说明","character_updates":[{"find":"角色名或别名","set":{"currentGoal":"新目标"}}],"character_adds":[{"name":"姓名","personality":"…"}],"world_upserts":[{"category":"地点/势力/规则/物品/其他","name":"条目名","content":"完整内容"}],"novel_updates":{"synopsis":"…","perspective":"…","styleGuide":"…"}}
                 4. character_updates.set 可用字段：name、aliases（顿号分隔）、appearance、personality、background、currentGoal、currentLocation、physicalState、mentalState、isSceneRelevant("true"/"false")；
-                5. 不支持删除；更新角色时只提交需要变化的字段，不要整卡重写；
-                6. 围栏之外的正文先用自然语言说明你打算改什么、为什么，随后等待作者确认——未经确认不会生效。
+                5. 不支持删除角色/世界观/卷/章本体；更新角色时只提交需要变化的字段，不要整卡重写；
+                6. 围栏之外的正文先用自然语言说明你打算改什么、为什么，随后等待作者确认——未经确认不会生效；
+                7. 重命名卷/章仅在作者明确要求时输出：
+                "volume_renames":[{"find":"现有卷名或第N卷","to":"新卷名"}]
+                "chapter_renames":[{"find":"现有章题（可加「卷名/」前缀消歧）","to":"新章题"}]
+                8. 章节场景卡细粒度操作（index 从 1 起）：
+                "scene_cards":[{"chapter":"章题","update":[{"index":2,"hook":"新钩子"}],"add":[{"goal":"","obstacle":"","hook":""}],"remove":[3]}]
+                其中 "replace":[{"goal":"","obstacle":"","hook":""}] 为整组替换，与 update/add/remove 互斥。
                 """
             ),
             BuiltInPrompt(

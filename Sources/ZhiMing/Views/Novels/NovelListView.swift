@@ -89,21 +89,22 @@ struct NovelListView: View {
                     renamingNovel = nil
                 }
             }
-            .confirmationDialog(
-                "删除「\(deletingNovel?.title ?? "")」？",
-                isPresented: Binding(
-                    get: { deletingNovel != nil },
-                    set: { if !$0 { deletingNovel = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("删除作品及其全部章节与设定", role: .destructive) {
-                    if let novel = deletingNovel { store.deleteNovel(novel) }
-                    deletingNovel = nil
+            // 删除作品：sheet 内嵌确认卡承载写入（v1.5.2 教训：系统弹窗按钮动作不可靠）
+            .sheet(item: $deletingNovel) { novel in
+                VStack(spacing: AppTheme.spacing[2]) {
+                    InlineConfirmCard(
+                        title: "删除「\(novel.title)」？",
+                        message: "作品下的卷、章节、角色、世界观与聊天记录将一并删除，无法恢复。",
+                        confirmLabel: "确认删除作品",
+                        onConfirm: {
+                            store.deleteNovel(novel)
+                            deletingNovel = nil
+                        },
+                        onCancel: { deletingNovel = nil }
+                    )
+                    Spacer()
                 }
-                Button("取消", role: .cancel) { deletingNovel = nil }
-            } message: {
-                Text("作品下的卷、章节、角色、世界观与聊天记录将一并删除，无法恢复。")
+                .padding(AppTheme.spacing[3])
             }
             // 持久层保存失败的全局提示（AppStore.lastSaveError 驱动，不再静默丢数据）
             .alert("保存失败", isPresented: Binding(

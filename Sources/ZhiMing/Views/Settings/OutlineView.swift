@@ -53,6 +53,9 @@ private struct VolumeOutlineSection: View {
     @State private var renamingVolume = false
     @State private var renameText = ""
     @State private var deletingVolume = false
+    @State private var renamingChapter: Chapter?
+    @State private var chapterRenameText = ""
+    @State private var deletingChapter: Chapter?
     @State private var showNoProviderAlert = false
     /// 草稿含 zm-dims 时是否随采纳一并写入四维
     @State private var applyDims = true
@@ -60,6 +63,22 @@ private struct VolumeOutlineSection: View {
 
     var body: some View {
         Section {
+            if deletingVolume {
+                // 破坏性确认用内联卡（v1.5.2 教训：系统弹窗按钮动作不可靠）
+                InlineConfirmCard(
+                    title: "删除「\(volume.name)」？",
+                    message: "卷下的章节、正文与版本快照将一并删除，无法恢复。",
+                    confirmLabel: "确认删除卷",
+                    onConfirm: {
+                        deletingVolume = false
+                        guard let novel = volume.novel else { return }
+                        novel.volumes.removeAll { $0.id == volume.id }
+                        for (index, v) in novel.sortedVolumes.enumerated() { v.sortOrder = index + 1 }
+                        store.save()
+                    },
+                    onCancel: { deletingVolume = false }
+                )
+            }
             MultilineField(text: $outlineDraft, placeholder: "卷纲（本卷走向概述）…", minHeight: 56)
                 .zmOnChange(of: outlineDraft) { newValue in
                     guard !syncDraft else { return }
@@ -88,10 +107,40 @@ private struct VolumeOutlineSection: View {
                             .foregroundColor(chapter.detailedOutline == nil ? Color(uiColor: .tertiaryLabel) : .secondary)
                             .lineLimit(2)
                     }
+                    // 整行可点：先撑满行宽，再声明命中区域（否则按文字宽度收缩）
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        chapterRenameText = chapter.title
+                        renamingChapter = chapter
+                    } label: {
+                        Label("重命名章节", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        deletingChapter = chapter
+                    } label: {
+                        Label("删除章节", systemImage: "trash")
+                    }
+                }
+            }
+
+            if let target = deletingChapter {
+                InlineConfirmCard(
+                    title: "删除「\(target.title)」？",
+                    message: "该章的正文、版本快照与摘要将一并删除，无法恢复。",
+                    confirmLabel: "确认删除章节",
+                    onConfirm: {
+                        deletingChapter = nil
+                        volume.chapters.removeAll { $0.id == target.id }
+                        volume.normalizeChapterOrder()
+                        store.save()
+                    },
+                    onCancel: { deletingChapter = nil }
+                )
             }
         } header: {
             Text(volume.name)
@@ -121,22 +170,6 @@ private struct VolumeOutlineSection: View {
                 store.save()
             }
         }
-        .confirmationDialog(
-            "删除「\(volume.name)」？",
-            isPresented: $deletingVolume,
-            titleVisibility: .visible
-        ) {
-            Button("删除卷及其全部章节", role: .destructive) {
-                if let novel = volume.novel {
-                    novel.volumes.removeAll { $0.id == volume.id }
-                    for (index, v) in novel.sortedVolumes.enumerated() { v.sortOrder = index + 1 }
-                    store.save()
-                }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("卷下的章节与快照将一并删除。")
-        }
         .alert("尚未配置模型提供商", isPresented: $showNoProviderAlert) {
             Button("好", role: .cancel) {}
         } message: {
@@ -152,6 +185,17 @@ private struct VolumeOutlineSection: View {
         }
         .sheet(item: $editingChapter) { chapter in
             ChapterOutlineEditSheet(chapter: chapter)
+        }
+        .sheet(item: $renamingChapter) { chapter in
+            RenameSheet(
+                title: "重命名章节",
+                placeholder: "章节名",
+                initialText: chapterRenameText
+            ) { newValue in
+                let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty { chapter.title = trimmed }
+                store.save()
+            }
         }
     }
 

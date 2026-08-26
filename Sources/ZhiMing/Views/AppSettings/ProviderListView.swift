@@ -60,22 +60,23 @@ struct ProviderListView: View {
         .sheet(item: $editingProvider) { provider in
             ProviderEditView(provider: provider)
         }
-        // 删除是破坏性操作且连带清除 Keychain 密钥：两步确认（与首页删作品同款交互）
-        .confirmationDialog(
-            "删除「\(deletingProvider?.name ?? "")」？",
-            isPresented: Binding(
-                get: { deletingProvider != nil },
-                set: { if !$0 { deletingProvider = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("删除提供商及其 API Key", role: .destructive) {
-                if let provider = deletingProvider { store.deleteProvider(provider) }
-                deletingProvider = nil
+        // 删除是破坏性操作且连带清除 Keychain 密钥：sheet 内嵌确认卡承载写入
+        // （v1.5.2 教训：系统弹窗按钮动作在本项目目标系统上不可靠）
+        .sheet(item: $deletingProvider) { provider in
+            VStack(spacing: AppTheme.spacing[2]) {
+                InlineConfirmCard(
+                    title: "删除「\(provider.name)」？",
+                    message: "将移除该提供商，并删除保存在钥匙串中的 API Key，无法恢复。",
+                    confirmLabel: "确认删除",
+                    onConfirm: {
+                        store.deleteProvider(provider)
+                        deletingProvider = nil
+                    },
+                    onCancel: { deletingProvider = nil }
+                )
+                Spacer()
             }
-            Button("取消", role: .cancel) { deletingProvider = nil }
-        } message: {
-            Text("保存在钥匙串中的 API Key 将一并删除，无法恢复。")
+            .padding(AppTheme.spacing[3])
         }
     }
 }
