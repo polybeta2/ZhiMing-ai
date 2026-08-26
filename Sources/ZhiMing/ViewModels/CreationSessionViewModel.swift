@@ -23,21 +23,44 @@ struct BlueprintWorld: Codable, Identifiable {
     enum CodingKeys: String, CodingKey { case category, name, content }
 }
 
+struct BlueprintSceneCard: Codable {
+    var goal: String?
+    var obstacle: String?
+    var hook: String?
+}
+
+struct BlueprintConflictRung: Codable {
+    var level: Int?
+    var obstacle: String?
+    var turning_point: String?
+}
+
+struct BlueprintInfoGap: Codable {
+    var start: String?
+    var end: String?
+}
+
 struct BlueprintChapter: Codable, Identifiable {
     var id = UUID()
     var title: String?
     var detailed_outline: String?
+    var scene_cards: [BlueprintSceneCard]?
 
-    enum CodingKeys: String, CodingKey { case title, detailed_outline }
+    enum CodingKeys: String, CodingKey { case title, detailed_outline, scene_cards }
 }
 
 struct BlueprintVolume: Codable, Identifiable {
     var id = UUID()
     var name: String?
     var outline: String?
+    var emotion_arc: [String]?
+    var conflict_ladder: [BlueprintConflictRung]?
+    var info_gap: BlueprintInfoGap?
     var chapters: [BlueprintChapter] = []
 
-    enum CodingKeys: String, CodingKey { case name, outline, chapters }
+    enum CodingKeys: String, CodingKey {
+        case name, outline, emotion_arc, conflict_ladder, info_gap, chapters
+    }
 }
 
 struct NovelBlueprint: Codable {
@@ -75,10 +98,6 @@ final class CreationSessionViewModel: ObservableObject {
             errorMessage = "未配置有效的模型接口或 API Key"
             return
         }
-        phase = .streaming
-        draft = ""
-        errorMessage = nil
-        KeepAwake.set(true)
 
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
@@ -86,7 +105,7 @@ final class CreationSessionViewModel: ObservableObject {
             providerExtra: provider.systemPromptExtra,
             to: PromptTemplates.creationBlueprint(brief: brief, supplement: supplement)
         )
-        stream(messages: messages, client: client, config: config)
+        authorizeThenStream(messages: messages, client: client, config: config)
     }
 
     // MARK: 对话修订
@@ -102,10 +121,6 @@ final class CreationSessionViewModel: ObservableObject {
             errorMessage = "未配置有效的模型接口或 API Key"
             return
         }
-        phase = .streaming
-        draft = ""
-        errorMessage = nil
-        KeepAwake.set(true)
 
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
@@ -113,10 +128,26 @@ final class CreationSessionViewModel: ObservableObject {
             providerExtra: provider.systemPromptExtra,
             to: PromptTemplates.creationRevise(blueprintJSON: json, feedback: feedback, supplement: supplement)
         )
-        stream(messages: messages, client: client, config: config)
+        authorizeThenStream(messages: messages, client: client, config: config)
     }
 
     func stop() { streamTask?.cancel() }
+
+    /// 体量护栏（v1.7）：超过告警线的请求先弹确认，确认通过才进入流式状态；
+    /// 取消则保持原 phase（collecting/revising），不产生任何写入。
+    private func authorizeThenStream(messages: [LLMMessage],
+                                     client: OpenAICompatibleClient,
+                                     config: GenerationConfig) {
+        let totalChars = messages.totalContentChars
+        Task { @MainActor in
+            guard await PromptGuard.authorized(totalChars: totalChars) else { return }
+            self.phase = .streaming
+            self.draft = ""
+            self.errorMessage = nil
+            KeepAwake.set(true)
+            self.stream(messages: messages, client: client, config: config)
+        }
+    }
 
     /// 供对话修订时携带当前蓝图
     func blueprintJSON() -> String? {
@@ -161,16 +192,18 @@ final class CreationSessionViewModel: ObservableObject {
             novel.characters.append(card)
         }
 
-        // 世界观
-        novel.worldEntries = []
+        // 世界观：合并而非清空——立项进行中允许手动录入条目，
+        // 置空会在确认蓝图时静默丢失它们（同名条目保留用户手输版本）
         let validCategories = Set(WorldListView.categories)
+        var existingNames = Set(novel.worldEntries.map(\.name))
         for item in blueprint.worldbuilding {
             let name = item.name?.trimmingCharacters(in: .whitespaces) ?? ""
-            guard !name.isEmpty else { continue }
+            guard !name.isEmpty, !existingNames.contains(name) else { continue }
             let category = validCategories.contains(item.category ?? "") ? item.category! : "其他"
             let entry = WorldEntry(category: category, name: name, content: item.content ?? "")
             entry.novel = novel
             novel.worldEntries.append(entry)
+            existingNames.insert(name)
         }
 
         // 卷与章
@@ -182,12 +215,41 @@ final class CreationSessionViewModel: ObservableObject {
                 outline: item.outline
             )
             volume.novel = novel
+
+            // 四维：情绪走向 / 冲突阶梯 / 信息差（可空字段，旧蓝图兼容）
+            if let arc = item.emotion_arc?.filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+               !arc.isEmpty {
+                volume.emotionArc = arc
+            }
+            if let ladder = item.conflict_ladder {
+                let rungs = ladder.enumerated().compactMap { index, rung -> ConflictRung? in
+                    let obstacle = rung.obstacle?.trimmingCharacters(in: .whitespaces) ?? ""
+                    guard !obstacle.isEmpty else { return nil }
+                    return ConflictRung(level: rung.level ?? index + 1,
+                                        obstacle: obstacle,
+                                        turningPoint: rung.turning_point)
+                }
+                if !rungs.isEmpty { volume.conflictLadder = rungs }
+            }
+            if let gap = item.info_gap {
+                let parsed = InfoGap(start: gap.start?.trimmingCharacters(in: .whitespaces) ?? "",
+                                     end: gap.end?.trimmingCharacters(in: .whitespaces) ?? "")
+                if !parsed.isEmpty { volume.infoGap = parsed }
+            }
+
             for (chapterIndex, chapterItem) in item.chapters.enumerated() {
                 let chapter = Chapter(
                     title: chapterItem.title?.isEmpty == false ? chapterItem.title! : "第\(chapterIndex + 1)章",
                     sortOrder: chapterIndex + 1
                 )
                 chapter.detailedOutline = chapterItem.detailed_outline
+
+                // 场景卡：三要素全空的丢弃
+                let cards = (chapterItem.scene_cards ?? []).map { card in
+                    SceneCard(goal: card.goal ?? "", obstacle: card.obstacle ?? "", hook: card.hook ?? "")
+                }.filter { !$0.isEmpty }
+                if !cards.isEmpty { chapter.sceneCards = cards }
+
                 chapter.volume = volume
                 volume.chapters.append(chapter)
             }

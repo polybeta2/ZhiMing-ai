@@ -12,6 +12,7 @@
 - **章节编辑器**：沉浸正文编辑、字数统计、防抖保存
 - **AI 写作**：续写（800/1500/2500 字快捷档）/ 改写 / 润色，SSE 流式输出、随时停止；草稿卡片支持采纳 / 重新生成 / 放弃
 - **上下文装配**：三级装配（必需层：风格约束+细纲+正文末尾 800 字；高优先层：最近 3 章摘要+关键事实；可选层：场景角色卡+世界观），字符预算控制，超预算裁剪有提示
+- **提示词体量护栏**：R18/标签/附加指令等动态注入计入输入预算；开发者入口（提示词覆盖、标签预设、附加指令）20K 字符硬上限；标签智能注入 8K 合计熔断；必需层字段超 4K 留尾截断并在界面提示；聊天历史单条 2K 截断；请求总字符超 80K 发送前弹确认
 - **叙事账本（简化版）**：AI 生成章节摘要与关键事实，下一章续写自动回注
 - **版本快照**：AI 采纳前自动快照、手动保存、回退本身也生成新版本（历史永不丢失）
 - **模型设置**：任意 OpenAI 兼容接口（OpenAI / DeepSeek / 通义千问 / 自定义中转），API Key 仅存 Keychain；支持从 `/models` 拉取可用模型列表搜索选择
@@ -32,7 +33,7 @@
 Sources/ZhiMing/
 ├─ App/          # 入口 + 设计令牌（AppTheme）
 ├─ Models/       # Novel/Volume/Chapter/ChapterSummary/ChapterSnapshot/CharacterCard/WorldEntry/ChatThread/ChatMessage/ProviderConfig + SeedData
-├─ Services/     # AppStore(持久层) Keychain LLMClient OpenAICompatibleClient ContextBuilder PromptTemplates SnapshotService
+├─ Services/     # AppStore(持久层) Keychain LLMClient OpenAICompatibleClient ContextBuilder PromptTemplates PromptLibrary PromptGuard(体量护栏) ProseChecker SnapshotService
 ├─ ViewModels/   # WritingSessionViewModel(写作) CreationSessionViewModel(立项状态机)
 └─ Views/        # Novels / Chat / Editor / Settings / AppSettings
 ```
@@ -93,6 +94,21 @@ cd ZhiMing
 - `ContentUnavailableView` → `EmptyStateView`；alert 内嵌 TextField → `RenameSheet`
 - `TextField(axis: .vertical)` → `MultilineField`（TextEditor 基）；TextEditor 深色底用 UITextView 外观统一处理
 - 其余：`ShapeStyle.opacity`/`Color.gradient`/两参 `onChange`/`Task.sleep(for:)`/`URL.appending(path:)` 等逐项替换为 iOS 15 可用写法
+
+### 提示词体量护栏（v1.7，版本号 1.7.0）
+
+对「单次请求注入极多提示词」的六项加固（上限常量集中于 `Services/PromptLibrary.swift` 的 `PromptLimits`）：
+
+| # | 加固项 | 上限 / 行为 |
+|---|---|---|
+| 1 | 开发者入口硬上限 | 提示词覆盖、标签预设、附加指令各 20K 字符保存时截断；标签智能注入合计 8K 熔断 |
+| 2 | 动态注入计入预算 | R18 规范/读写协议/附加指令先从 `contextBudgetChars` 扣减再装配上下文 |
+| 3 | R18 模块预算化 | 废除「最多 4 个」改为合计 ≤12K 字符，小模块优先装填 |
+| 4 | 必需层兜底截断 | 风格约束/梗概/卷纲/细纲等超 4K 保留末尾并在裁剪提示中上报 |
+| 5 | 聊天历史单条截断 | 最近 12 条之外每条最多取前 2K 字符 |
+| 6 | 发送前总字符确认 | 合计 >80K 字符弹系统确认框（UIKit 实现，规避 SwiftUI .alert 回调不可靠问题），取消则零写入 |
+
+覆盖全部五类请求链路：续写/改写、蓝图生成/修订、卷纲/细纲、章节摘要、写作助手聊天。
 
 ## 🙏 致谢
 

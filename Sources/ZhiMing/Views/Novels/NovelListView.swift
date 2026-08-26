@@ -105,6 +105,15 @@ struct NovelListView: View {
             } message: {
                 Text("作品下的卷、章节、角色、世界观与聊天记录将一并删除，无法恢复。")
             }
+            // 持久层保存失败的全局提示（AppStore.lastSaveError 驱动，不再静默丢数据）
+            .alert("保存失败", isPresented: Binding(
+                get: { store.lastSaveError != nil },
+                set: { if !$0 { store.clearSaveError() } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(store.lastSaveError ?? "")
+            }
         }
     }
 

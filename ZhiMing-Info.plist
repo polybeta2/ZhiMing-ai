@@ -4,6 +4,10 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>织命</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.7.0</string>
+	<key>CFBundleVersion</key>
+	<string>1.7.0</string>
 	<key>CFBundleIcons</key>
 	<dict>
 		<key>CFBundlePrimaryIcon</key>
@@ -18,8 +22,8 @@
 	<string>zh_CN</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- 用户可能配置 http:// 的本地代理/中转提供商 -->
-		<key>NSAllowsArbitraryLoads</key>
+		<!-- 放行本地/局域网 http 代理（127.0.0.1 及私有网段）；公网明文 http 维持系统拦截 -->
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 </dict>

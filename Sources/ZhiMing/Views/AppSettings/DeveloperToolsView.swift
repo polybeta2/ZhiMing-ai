@@ -112,9 +112,15 @@ struct PromptEditView: View {
 
     var body: some View {
         Form {
-            Section(footer: Text(placeholders.isEmpty ? "此模板无占位符，可直接整段改写。" : "可用占位符（发送时自动替换）：\(placeholders.joined(separator: "；"))")) {
+            Section(footer: Text(footerText)) {
                 MultilineField(text: $text, placeholder: "提示词内容", minHeight: 260)
                     .font(.callout)
+                HStack {
+                    Spacer()
+                    Text("\(text.count) / \(PromptLimits.maxOverrideChars)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(text.count > PromptLimits.maxOverrideChars ? .red : .secondary)
+                }
             }
             Section {
                 if showResetConfirm {
@@ -164,6 +170,13 @@ struct PromptEditView: View {
     }
 
     private var placeholders: [String] { prompt.placeholders }
+
+    private var footerText: String {
+        let base = placeholders.isEmpty
+            ? "此模板无占位符，可直接整段改写。"
+            : "可用占位符（发送时自动替换）：\(placeholders.joined(separator: "；"))"
+        return base + " 上限 \(PromptLimits.maxOverrideChars) 字，保存时超长部分自动截断（覆盖文本会原样进入每次请求）。"
+    }
 }
 
 // MARK: - 标签新增/编辑页
@@ -203,8 +216,14 @@ struct TagEditView: View {
                 TextField("标签名（如：赛博朋克）", text: $name)
                 TextField("触发关键词（逗号分隔，含标签名可不填）", text: $keywordsText)
             }
-            Section(footer: Text("用户启用该标签且创意输入命中任一关键词时，这段内容会作为创作方向约束拼入蓝图生成的系统提示词。")) {
+            Section(footer: Text("用户启用该标签且创意输入命中任一关键词时，这段内容会作为创作方向约束拼入蓝图生成的系统提示词。上限 \(PromptLimits.maxTagPresetChars) 字，保存时超长部分自动截断；多条命中标签的合计注入量另有 \(PromptLimits.matchedSupplementCap) 字熔断。")) {
                 MultilineField(text: $presetText, placeholder: "完整预设提示词内容…", minHeight: 200)
+                HStack {
+                    Spacer()
+                    Text("\(presetText.count) / \(PromptLimits.maxTagPresetChars)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(presetText.count > PromptLimits.maxTagPresetChars ? .red : .secondary)
+                }
             }
             if existingTag != nil {
                 Section {

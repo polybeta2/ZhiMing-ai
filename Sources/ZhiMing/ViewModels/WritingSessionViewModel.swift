@@ -19,44 +19,61 @@ final class WritingSessionViewModel: ObservableObject {
         draft = ""
         errorMessage = nil
         truncatedSections = []
-        phase = .streaming
-        KeepAwake.set(true)   // 生成中保持屏幕常亮
 
         guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
               let baseUrl = URL(string: provider.baseUrl) else {
-            phase = .idle
-            KeepAwake.set(false)
             errorMessage = "未配置有效的模型接口或 API Key"
             return
         }
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
 
+        // R18 增强先算好：注入文本要参与输入预算扣减（v1.7）
+        let r18Text: String?
+        if novel.r18Enabled {
+            // 按输入语言注入对应版本的虚构情色写作规范（语言二选一，不混注）
+            let sample = (instruction?.isEmpty == false) ? instruction! : String(chapter.content.prefix(400))
+            r18Text = PromptLibrary.shared.r18Supplement(forInput: sample)
+        } else {
+            r18Text = nil
+        }
+
         let baseMessages: [LLMMessage]
         switch mode {
         case .continueWriting(let wordTarget):
-            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: provider.contextBudgetChars)
+            // 动态注入（R18/附加指令）先占用预算，剩余额度才装配上下文
+            let budget = PromptTemplates.adjustedInputBudget(
+                base: provider.contextBudgetChars,
+                injections: r18Text, provider.systemPromptExtra)
+            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget)
             truncatedSections = context.truncatedSections
             baseMessages = PromptTemplates.continueWriting(context: context, wordTarget: wordTarget, extra: instruction)
-            // 验收用：控制台可核对上下文是否包含风格约束/细纲/前文摘要
-            print("[ContextBuilder] 续写上下文（\(context.rendered.count) 字）：\n\(context.rendered)")
-            if !context.truncatedSections.isEmpty {
-                print("[ContextBuilder] 超预算被裁剪：\(context.truncatedSections.joined(separator: "、"))")
-            }
+            // 注：不得把上下文写入日志——正文/细纲/摘要均属用户隐私（验收用的 print 已移除）
         case .rewrite(let rewriteMode, let selection):
             baseMessages = PromptTemplates.rewrite(mode: rewriteMode, selection: selection, instruction: instruction)
         }
-        // R18 增强：按输入语言注入对应版本的虚构情色写作规范（语言二选一，不混注）
         var scoped = baseMessages
-        if novel.r18Enabled {
-            let sample = (instruction?.isEmpty == false) ? instruction! : String(chapter.content.prefix(400))
-            scoped = PromptTemplates.applying(
-                providerExtra: PromptLibrary.shared.r18Supplement(forInput: sample),
-                to: scoped
-            )
+        if let r18 = r18Text {
+            scoped = PromptTemplates.applying(providerExtra: r18, to: scoped)
         }
         let messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: scoped)
 
+        // 体量护栏：超过告警线需确认后才进入流式状态（v1.7）
+        let totalChars = messages.totalContentChars
+        Task { @MainActor in
+            guard await PromptGuard.authorized(totalChars: totalChars) else {
+                truncatedSections = []
+                return
+            }
+            self.beginStreaming(messages: messages, client: client, config: config)
+        }
+    }
+
+    private func beginStreaming(messages: [LLMMessage],
+                                client: OpenAICompatibleClient,
+                                config: GenerationConfig) {
+        phase = .streaming
+        KeepAwake.set(true)   // 生成中保持屏幕常亮
         streamTask = Task {
             // 流式节流：delta 先进缓冲，约 100ms 刷新一次发布属性，避免逐字重渲染卡顿
             var accumulated = ""

@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $cmd = "cd /mnt/d/iOS/ZhiMing && exec env PATH=/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin:/usr/local/bin:/usr/bin:/bin LD_LIBRARY_PATH=/opt/swift-6.3.3-RELEASE-ubuntu24.04/usr/lib/swift/linux /opt/xtool dev build --ipa 2>&1 | grep -v 'no version information available'"
 
-wsl -d Ubuntu -u root bash -lc $cmd
+wsl -d Ubuntu bash -lc $cmd
 if ($LASTEXITCODE -ne 0) {
     Write-Error "构建失败，退出码 $LASTEXITCODE"
 }

@@ -174,6 +174,11 @@ struct ChapterEditorView: View {
                     rewritePresetMode = "润色"
                     showRewriteSheet = true
                 }
+                toolButton("去AI味", icon: "text.badge.checkmark") {
+                    guard ensureProvider() else { return }
+                    rewritePresetMode = "去AI味"
+                    showRewriteSheet = true
+                }
                 toolButton(chapter.summary == nil ? "生成摘要" : "摘要", icon: "doc.plaintext") {
                     if chapter.summary != nil {
                         summaryError = nil
@@ -227,6 +232,16 @@ struct ChapterEditorView: View {
 
     private func startRewrite(mode: String, selection: String, instruction: String?) {
         guard let provider = activeProvider, let novel else { return }
+        // 「去AI味」：先跑本地文风快检，把问题清单并入要求（模型按清单优先处理）
+        var effectiveInstruction = instruction
+        if mode == "去AI味" {
+            let issues = ProseChecker.reportLines(in: selection)
+            let report = issues.isEmpty
+                ? "本地快检未发现明显模板腔，请通读后按规范微调。"
+                : issues.joined(separator: "\n")
+            effectiveInstruction = "【本地体检结果】\n\(report)" +
+                (instruction.map { "\n【作者附加】\($0)" } ?? "")
+        }
         lastRewrite = (mode, selection, instruction)
         lastContinue = nil
         vm.start(
@@ -234,7 +249,7 @@ struct ChapterEditorView: View {
             chapter: chapter,
             novel: novel,
             provider: provider,
-            instruction: instruction
+            instruction: effectiveInstruction
         )
     }
 
@@ -284,8 +299,14 @@ struct ChapterEditorView: View {
             to: PromptTemplates.summarize(content: chapter.content, title: chapter.title)
         )
 
+        // 体量护栏（v1.7）：整章正文无预算直发，超告警线先确认
+        let totalChars = messages.totalContentChars
         summaryTask?.cancel()
         summaryTask = Task { @MainActor in
+            guard await PromptGuard.authorized(totalChars: totalChars) else {
+                summaryGenerating = false
+                return
+            }
             var raw = ""
             do {
                 for try await delta in client.streamChat(messages: messages, config: config) {
@@ -393,7 +414,7 @@ private struct RewriteSheet: View {
     @State private var instruction = ""
     let onStart: (String, String, String?) -> Void
 
-    private let modes = ["改写", "润色", "扩写"]
+    private let modes = ["改写", "润色", "扩写", "去AI味"]
 
     init(presetMode: String, onStart: @escaping (String, String, String?) -> Void) {
         _mode = State(initialValue: presetMode)
@@ -420,7 +441,7 @@ private struct RewriteSheet: View {
                     } label: {
                         Label("从剪贴板粘贴选中的文字", systemImage: "doc.on.clipboard")
                     }
-                    .disabled(UIPasteboard.general.string?.isEmpty != false)
+                    // 不在 body 渲染期读取 UIPasteboard：会反复触发系统粘贴授权横幅
                 } header: {
                     Text("待处理片段")
                 } footer: {
@@ -430,7 +451,7 @@ private struct RewriteSheet: View {
                     MultilineField(text: $instruction, placeholder: "例如：加强动作描写，压缩对话…", minHeight: 48)
                 }
             }
-            .navigationTitle("AI \(mode)")
+            .navigationTitle(mode == "去AI味" ? "去 AI 味" : "AI \(mode)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

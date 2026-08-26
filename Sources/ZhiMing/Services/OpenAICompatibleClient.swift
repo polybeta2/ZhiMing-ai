@@ -20,8 +20,12 @@ final class OpenAICompatibleClient: LLMClient {
                     let (bytes, response) = try await URLSession.shared.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else { throw LLMError.invalidURL }
                     guard http.statusCode == 200 else {
+                        // 上限截断：异常端点可能持续推流，防止无界内存增长
                         var body = ""
-                        for try await line in bytes.lines { body += line }
+                        for try await line in bytes.lines {
+                            body += line
+                            if body.count >= 4096 { body += "……"; break }
+                        }
                         throw LLMError.httpStatus(http.statusCode, body)
                     }
                     for try await line in bytes.lines {

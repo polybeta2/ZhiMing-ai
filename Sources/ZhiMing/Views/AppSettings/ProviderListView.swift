@@ -5,6 +5,7 @@ struct ProviderListView: View {
     @EnvironmentObject private var store: AppStore
     @State private var editingProvider: ProviderConfig?
     @State private var showNew = false
+    @State private var deletingProvider: ProviderConfig?
 
     var body: some View {
         List {
@@ -36,9 +37,9 @@ struct ProviderListView: View {
                         }
                     }
                     Button(role: .destructive) {
-                        store.deleteProvider(provider)
+                        deletingProvider = provider
                     } label: {
-                        Label("删除", systemImage: "trash")
+                        Label("删除…", systemImage: "trash")
                     }
                 }
             }
@@ -58,6 +59,23 @@ struct ProviderListView: View {
         }
         .sheet(item: $editingProvider) { provider in
             ProviderEditView(provider: provider)
+        }
+        // 删除是破坏性操作且连带清除 Keychain 密钥：两步确认（与首页删作品同款交互）
+        .confirmationDialog(
+            "删除「\(deletingProvider?.name ?? "")」？",
+            isPresented: Binding(
+                get: { deletingProvider != nil },
+                set: { if !$0 { deletingProvider = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除提供商及其 API Key", role: .destructive) {
+                if let provider = deletingProvider { store.deleteProvider(provider) }
+                deletingProvider = nil
+            }
+            Button("取消", role: .cancel) { deletingProvider = nil }
+        } message: {
+            Text("保存在钥匙串中的 API Key 将一并删除，无法恢复。")
         }
     }
 }

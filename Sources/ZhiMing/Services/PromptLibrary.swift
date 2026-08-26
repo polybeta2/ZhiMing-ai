@@ -1,6 +1,27 @@
 import Foundation
 import Combine
 
+// MARK: - 提示词体量护栏常量（v1.7 全项目统一引用）
+
+/// 所有上限均为「字符数」。集中定义便于调参与审计。
+/// 超限行为：开发者输入保存时截断 / 标签注入熔断跳过 / 必需层字段留尾截断 / 超大请求发送前确认。
+enum PromptLimits {
+    /// 单条提示词覆盖文本、提供商附加系统指令的硬上限（保存时截断）
+    static let maxOverrideChars = 20_000
+    /// 单个示例标签 presetText 的硬上限（保存时截断）
+    static let maxTagPresetChars = 20_000
+    /// 「标签智能注入」单次请求的合计熔断线（超出部分跳过并附提示）
+    static let matchedSupplementCap = 8_000
+    /// R18 特化模块单次请求的合计字符预算（小模块优先装填）
+    static let r18ModuleCharBudget = 12_000
+    /// 必需层字段（风格约束/梗概/卷纲/细纲等）的兜底截断线（保留尾部）
+    static let requiredFieldCap = 4_000
+    /// 写作助手聊天历史的单条消息截断线
+    static let historyMessageCap = 2_000
+    /// 发送前总字符告警线：超过则弹确认框（PromptGuard）
+    static let requestWarnChars = 80_000
+}
+
 // MARK: - 示例标签数据模型（一句话立项增强）
 
 /// 单个示例标签：用户「启用」且输入命中关键词时，presetText 注入蓝图生成的系统提示词
@@ -35,6 +56,10 @@ enum PromptID {
     static let creationBlueprint = "prompt.creation.blueprint.system"
     static let creationRevise = "prompt.creation.revise.system"
     static let writingAssistant = "prompt.assistant.system"
+    static let assistantReadWrite = "prompt.assistant.rw.protocol"
+    static let antiAIFlavor = "prompt.antiai.system"
+    static let volumeOutline = "prompt.volume.outline.system"
+    static let chapterOutline = "prompt.chapter.outline.system"
     static let r18zh = "prompt.r18.system.zh"
     static let r18en = "prompt.r18.system.en"
 }
@@ -71,24 +96,54 @@ final class PromptLibrary: ObservableObject {
         return dir.appendingPathComponent("prompts.json")
     }
 
+    /// 备份文件（单代，随每次保存同步刷新）
+    static var backupURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("ZhiMing", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("prompts.json.bak")
+    }
+
     private init() {
         builtInPrompts = Self.makeBuiltInPrompts()
-        if let data = try? Data(contentsOf: Self.fileURL),
-           let doc = try? JSONDecoder().decode(Document.self, from: data) {
+        if let doc = Self.decodeDocument(at: Self.fileURL) ?? Self.decodeDocument(at: Self.backupURL) {
             overrides = doc.overrides
             tagCategories = doc.tagCategories.isEmpty ? Self.defaultTagCategories() : doc.tagCategories
         } else {
+            // 主/备均不可读：隔离损坏文件（不原地覆盖），回到出厂标签库
+            if FileManager.default.fileExists(atPath: Self.fileURL.path)
+                || FileManager.default.fileExists(atPath: Self.backupURL.path) {
+                Self.quarantineUnreadableFiles()
+            }
             tagCategories = Self.defaultTagCategories()
         }
     }
 
-    /// 原子保存；所有写操作后调用
+    private static func decodeDocument(at url: URL) -> Document? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(Document.self, from: data)
+    }
+
+    private static func quarantineUnreadableFiles() {
+        let stamp = Int(Date().timeIntervalSince1970)
+        for url in [fileURL, backupURL] where FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.moveItem(at: url, to: URL(fileURLWithPath: url.path + ".corrupt-\(stamp)"))
+        }
+    }
+
+    /// 原子保存 + 同步刷新备份（文件小，双写成本可忽略）；提示词库属低危数据，失败不打断创作流
     func save() {
         let doc = Document(overrides: overrides, tagCategories: tagCategories)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(doc) else { return }
-        try? data.write(to: Self.fileURL, options: [.atomic])
+        do {
+            try data.write(to: Self.fileURL, options: [.atomic])
+            try? data.write(to: Self.backupURL, options: [.atomic])
+        } catch {
+            // 静默即可：overrides/tags 可随时由出厂默认重建
+        }
     }
 
     // MARK: 提示词读取与覆盖
@@ -101,14 +156,15 @@ final class PromptLibrary: ObservableObject {
 
     func isCustomized(_ id: String) -> Bool { overrides[id] != nil }
 
-    /// 保存覆盖；若与出厂默认一致则移除覆盖（保持文档干净）
+    /// 保存覆盖；若与出厂默认一致则移除覆盖（保持文档干净）。
+    /// 硬上限：超长文本截断到 maxOverrideChars——覆盖文本会原样进每次请求，必须封顶。
     func setOverride(_ id: String, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let prompt = builtInPrompts.first(where: { $0.id == id }),
            trimmed == prompt.defaultText.trimmingCharacters(in: .whitespacesAndNewlines) {
             overrides.removeValue(forKey: id)
         } else {
-            overrides[id] = text
+            overrides[id] = String(text.prefix(PromptLimits.maxOverrideChars))
         }
         save()
     }
@@ -136,21 +192,34 @@ final class PromptLibrary: ObservableObject {
 
     /// 规则：仅当「标签已被启用」且「输入包含该标签关键词」时返回其预设内容；
     /// 未启用 → 绝不注入；全部未启用或无一命中 → 返回 nil（只发原始输入）。
+    /// 熔断：命中内容合计超过 matchedSupplementCap 时跳过放不下的条目并附提示，
+    /// 防止「大量启用标签 + 输入凑齐全部关键词」把 system 撑到 MB 级。
     func matchedSupplement(enabledIDs: [String], input: String) -> String? {
         guard !enabledIDs.isEmpty, !input.isEmpty else { return nil }
         var lines: [String] = []
+        var used = 0
+        var dropped = 0
         for category in tagCategories {
             for tag in category.tags where enabledIDs.contains(tag.id) {
                 let hit = input.contains(tag.name)
                     || tag.keywords.contains(where: { !$0.isEmpty && input.contains($0) })
-                if hit {
-                    lines.append("◆ \(tag.name)：\(tag.presetText)")
+                guard hit else { continue }
+                let line = "◆ \(tag.name)：\(tag.presetText)"
+                if used + line.count > PromptLimits.matchedSupplementCap {
+                    dropped += 1
+                    continue
                 }
+                lines.append(line)
+                used += line.count
             }
         }
         guard !lines.isEmpty else { return nil }
-        return "【创作方向补充】\n以下为作者启用的创作方向约束，规划蓝图（题材、人物、世界观、卷章节奏）时必须严格遵循：\n"
+        var body = "【创作方向补充】\n以下为作者启用的创作方向约束，规划蓝图（题材、人物、世界观、卷章节奏）时必须严格遵循：\n"
             + lines.joined(separator: "\n")
+        if dropped > 0 {
+            body += "\n\n（另有 \(dropped) 条命中标签因合计注入量超过 \(PromptLimits.matchedSupplementCap) 字上限，本次未注入）"
+        }
+        return body
     }
 
     // MARK: R18 增强（fictional-erotica 双语规范，语言分离注入）
@@ -221,8 +290,10 @@ final class PromptLibrary: ObservableObject {
             keywords: ["模板化", "太平淡", "干瘪", "不够色", "诊断", "校准", "generic", "水词"])
     ]
 
-    /// 单次请求最多追加的特化模块数（防上下文爆炸；按路由表顺序取先命中者）
-    private static let maxModulesPerRequest = 4
+    /// 单次请求特化模块的总字符预算（含 core 之后追加的全部模块正文）。
+    /// v1.7 起以「预算」取代旧「最多 4 个」：个数不限总量、大模块会霸占名额，
+    /// 改为小模块优先装填，保证注入量有硬上界。
+    private static let moduleCharBudget = PromptLimits.r18ModuleCharBudget
 
     /// 读取本地包内单个模块文件（零网络依赖）。language: "zh"/"en"
     static func bundledSkillFile(_ name: String, language: String) -> String? {
@@ -236,7 +307,7 @@ final class PromptLibrary: ObservableObject {
     }
 
     /// 按输入主语言组装 R18 规范——中英永不混合注入：
-    /// 核心（SKILL.md 契约）常驻，其后按关键词命中追加特化模块（≤4 个）。
+    /// 核心（SKILL.md 契约）常驻，其后按关键词命中的特化模块在字符预算内装填。
     /// 优先级：开发者覆盖文本 > 本地打包 Skill > 出厂精简版。
     /// 调用方负责先判断 novel.r18Enabled。
     func r18Supplement(forInput input: String) -> String {
@@ -253,16 +324,34 @@ final class PromptLibrary: ObservableObject {
         // 核心里的路由节已被提取脚本移除，这里补一行运行时路由说明
         core += "\n\n> 以下按本次请求命中的关键词加载对应特化模块。"
 
+        // 1) 收集全部命中模块 → 2) 小模块优先在预算内贪心装填 → 3) 按路由表顺序拼接输出
         let lowered = input.lowercased()
-        var loaded: [String] = []
-        for route in Self.r18ModuleRoutes where loaded.count < Self.maxModulesPerRequest {
-            guard route.keywords.contains(where: { lowered.contains($0) }) else { continue }
+        var hits: [(file: String, title: String, text: String)] = []
+        for route in Self.r18ModuleRoutes {
+            guard route.keywords.contains(where: { lowered.contains($0.lowercased()) }) else { continue }
             guard let text = Self.bundledSkillFile(route.file, language: lang) else { continue }
+            hits.append((route.file, route.title, text))
+        }
+        hits.sort { $0.text.count < $1.text.count }
+
+        var used = core.count
+        var chosen: [String: String] = [:]      // file -> text（保持去重）
+        for hit in hits {
+            if used + hit.text.count > Self.moduleCharBudget { break }   // 升序排列：装不下则后面更大，直接停
+            used += hit.text.count
+            chosen[hit.file] = hit.text
+        }
+
+        var loaded: [String] = []
+        for route in Self.r18ModuleRoutes {
+            guard let text = chosen[route.file] else { continue }
             core += "\n\n### § 特化模块：\(route.title)\n\n" + text
             loaded.append(route.file)
         }
         #if DEBUG
-        print("[R18] 语言=\(lang) 注入模块=\(loaded.isEmpty ? "仅core" : loaded.joined(separator: ", "))")
+        let overflow = hits.count - loaded.count
+        print("[R18] 语言=\(lang) 注入模块=\(loaded.isEmpty ? "仅core" : loaded.joined(separator: ", "))"
+            + (overflow > 0 ? "（\(overflow) 个命中模块超预算未注入）" : ""))
         #endif
         return core
     }
@@ -270,6 +359,11 @@ final class PromptLibrary: ObservableObject {
     // MARK: 标签库维护（开发者功能）
 
     func upsertTag(_ tag: PromptTag, categoryId: String) {
+        var tag = tag
+        // 硬上限：presetText 会整段注入蓝图 system，必须封顶（保存时截断）
+        if tag.presetText.count > PromptLimits.maxTagPresetChars {
+            tag.presetText = String(tag.presetText.prefix(PromptLimits.maxTagPresetChars))
+        }
         guard let index = tagCategories.firstIndex(where: { $0.id == categoryId }) else { return }
         if let tagIndex = tagCategories[index].tags.firstIndex(where: { $0.id == tag.id }) {
             tagCategories[index].tags[tagIndex] = tag
@@ -317,6 +411,25 @@ final class PromptLibrary: ObservableObject {
                 """
             ),
             BuiltInPrompt(
+                id: PromptID.antiAIFlavor,
+                name: "去 AI 味 · 系统提示词",
+                category: "写作",
+                placeholders: [],
+                defaultText: """
+                你是一位专责「去机器腔」的中文小说编辑。用户给出一段正文（可能附带本地检测结果），请只改表达、不改内容：
+                1. 剧情、对话语义、人物语气、专有名词与设定一律保留；不增删情节信息，不引入新设定；
+                2. 清除解释性对举句式（「不是……而是……」式说明腔），改为动作与画面直接呈现；
+                3. 删减万能比喻（「仿佛/犹如/宛如」式滥用），全段至多保留一处必要的；
+                4. 拆掉「让/令/使 + 抽象感受」的强加因果，换成角色可观察的行为反应；
+                5. 少用「意识到/感到/明白/心中一凛」类认知直陈，情绪经身体细节与环境互动外化；
+                6. 替换高频模板神态动作（瞳孔特写、倒吸凉气、勾唇、心中涌起一类），换成贴合人物习惯的具体小动作；
+                7. 打破句长均一：长短句交替，连续等长的段落必须变奏；「了」字过密处改完成态或直接动词；
+                8. 幅度护栏：以词句为单位微调，不做整段重写；拿不准的地方保持原样；
+                9. 若给出【本地体检结果】，逐项优先处理其指出的问题；
+                10. 只输出修改后的正文，不要解释、对照表或总结。
+                """
+            ),
+            BuiltInPrompt(
                 id: PromptID.summarize,
                 name: "章节摘要建档 · 系统提示词",
                 category: "档案",
@@ -342,8 +455,14 @@ final class PromptLibrary: ObservableObject {
                   "style_guide": "文风约束（100字内）",
                   "characters": [{"name": "", "role": "主角/配角", "appearance": "", "personality": "", "goal": ""}],
                   "worldbuilding": [{"category": "地点/势力/规则/物品", "name": "", "content": ""}],
-                  "volumes": [{"name": "卷名", "outline": "卷纲（100字内）", "chapters": [{"title": "", "detailed_outline": "细纲（80字内）"}]}]
+                  "volumes": [{"name": "卷名", "outline": "卷纲（100字内）", "emotion_arc": [], "conflict_ladder": [], "info_gap": {"start": "", "end": ""}, "chapters": [{"title": "", "detailed_outline": "细纲（80字内）", "scene_cards": [{"goal": "", "obstacle": "", "hook": ""}]}]}]
                 }
+                卷对象请额外给出三个规划维度：
+                - "emotion_arc"：本卷情绪走向 4-6 拍的数组，如 ["压抑","压抑","提升","打脸"]；
+                - "conflict_ladder"：冲突阶梯数组，核心冲突拆 2-4 层逐级升高，每层 {"level": 层序, "obstacle": 该层阻力, "turning_point": 跨入该层的转折点}；
+                - "info_gap"：信息差，start=卷初读者与主角知道什么，end=卷末将揭示或颠覆什么。
+                每章对象请给出 "scene_cards"：1-3 张场景卡，每张 {"goal": 主角这场想达成什么, "obstacle": 什么拦着, "hook": 章末勾住读者的悬念}。
+                第一卷必须完整填写上述维度；其余卷至少给 emotion_arc 与 info_gap。
                 第一卷至少给出 3 章细纲，其余卷各 2-3 章占位即可。
                 """
             ),
@@ -356,6 +475,57 @@ final class PromptLibrary: ObservableObject {
                 你是一位资深小说策划。用户已有一套小说蓝图，现在提出修改意见。
                 请基于当前蓝图按意见修订，输出修订后的完整蓝图，严格输出 JSON（不要输出其他内容），
                 字段结构与原蓝图一致；意见未涉及的字段原样保留，不得遗漏。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.volumeOutline,
+                name: "卷纲生成 · 系统提示词",
+                category: "大纲",
+                placeholders: [],
+                defaultText: """
+                你是一位资深中文长篇小说策划，为指定的一卷撰写「卷纲」。严格遵守：
+                1. 承接【作品梗概】【风格约束】与【前文摘要】，延续【最近正文节选】的实际走向，不与已确立事实矛盾；
+                2. 概述本卷核心冲突、2-4 个关键转折与卷末落点，体现主角目标的推进或变化；
+                3. 若给出【当前卷纲】，视为修订而非重起，保留仍然成立的内容；
+                4. 参考【全书结构】控制本卷容量，不越界写其他卷的核心事件；
+                5. 只输出卷纲正文（约 150-300 字），不要标题、解释或前言；
+                6. 若本次对情绪走向 / 冲突阶梯 / 信息差有调整，在回复末尾追加一个 ```zm-dims``` 围栏，内为严格 JSON（三个字段均可省略）：
+                {"emotion_arc":["压抑","提升","打脸"],"conflict_ladder":[{"obstacle":"该层阻力","turning_point":"跨入该层的转折"}],"info_gap":{"start":"卷初已知","end":"卷末揭示"}}
+                冲突阶梯无需写 level，将按给出顺序从 1 编号；无维度调整则不要输出该围栏。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.chapterOutline,
+                name: "章细纲生成 · 系统提示词",
+                category: "大纲",
+                placeholders: [],
+                defaultText: """
+                你是一位资深中文小说编辑，为指定章节撰写「章细纲」（写作前的执行大纲）。严格遵守：
+                1. 承接【上一章】的收束并为【下一章】留出接口，遵循【所在卷】卷纲的节奏；
+                2. 若有【当前细纲】或【本章已写正文末尾】，视为修订而非重起，与已确立事实保持一致；
+                3. 写明本章场景、出场角色、核心冲突、推进节拍（2-4 拍）与章末钩子；
+                4. 人物动机须符合【角色当前状态】，不得引入未经确认的新设定；
+                5. 只输出细纲正文（约 120-250 字），不要标题与解释；
+                6. 在回复末尾追加一个 ```zm-scene``` 围栏，内为本章 1-3 张场景卡的严格 JSON 数组：
+                [{"goal":"主角这场想达成什么","obstacle":"什么拦着","hook":"章末悬念钩子"}]
+                细纲正文不必复述卡片清单；确实无法分场时可省略该围栏。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.assistantReadWrite,
+                name: "写作助手 · 读写协议",
+                category: "助手",
+                placeholders: [],
+                defaultText: """
+                【写作助手 · 读写协议（作者已开启读写模式）】
+                你可以提议修改本书设定，但必须遵守：
+                1. 仅当作者的请求明确要求修改时才输出补丁；纯咨询、头脑风暴一律不输出补丁；
+                2. 补丁放在回复末尾的一个 ```zm-patch 围栏代码块中，每条回复至多一个；
+                3. 围栏内是严格 JSON，所有字段均可省略，结构如下：
+                {"summary":"本次改动一句话说明","character_updates":[{"find":"角色名或别名","set":{"currentGoal":"新目标"}}],"character_adds":[{"name":"姓名","personality":"…"}],"world_upserts":[{"category":"地点/势力/规则/物品/其他","name":"条目名","content":"完整内容"}],"novel_updates":{"synopsis":"…","perspective":"…","styleGuide":"…"}}
+                4. character_updates.set 可用字段：name、aliases（顿号分隔）、appearance、personality、background、currentGoal、currentLocation、physicalState、mentalState、isSceneRelevant("true"/"false")；
+                5. 不支持删除；更新角色时只提交需要变化的字段，不要整卡重写；
+                6. 围栏之外的正文先用自然语言说明你打算改什么、为什么，随后等待作者确认——未经确认不会生效。
                 """
             ),
             BuiltInPrompt(

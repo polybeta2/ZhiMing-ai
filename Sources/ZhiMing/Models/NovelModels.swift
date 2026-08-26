@@ -99,10 +99,67 @@ extension Novel {
     static let r18NoticeText = "说明：此功能仅为合规的 R18 写作提示词注入，用于增强小说文采与场景表现力，并非「破甲」或「越狱」提示词。\n提醒：如需更高级别的 R18 内容生成，请自行配置相应模型或 API 权限，本功能不涉及任何绕过模型安全策略的操作。\n免责声明：生成的所有内容均由您自行负责，与本应用开发者及运营方无关。"
 }
 
+// MARK: - 卷章纲四维结构（情绪走向 / 冲突阶梯 / 信息差 / 场景卡）
+// 方法论参考 awesome-novel-agent 的维度划分，结构为本项目自行设计。
+
+/// 场景卡：本章一个场景的三要素
+struct SceneCard: Codable, Equatable {
+    var goal: String        // 主角这场想达成什么
+    var obstacle: String    // 什么拦着
+    var hook: String        // 什么悬念勾读者往下看
+
+    init(goal: String = "", obstacle: String = "", hook: String = "") {
+        self.goal = goal
+        self.obstacle = obstacle
+        self.hook = hook
+    }
+
+    var isEmpty: Bool {
+        goal.trimmingCharacters(in: .whitespaces).isEmpty
+            && obstacle.trimmingCharacters(in: .whitespaces).isEmpty
+            && hook.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+}
+
+/// 冲突阶梯的一级（核心冲突逐级升高）
+struct ConflictRung: Codable, Equatable {
+    var level: Int              // 层级序号（1 起）
+    var obstacle: String        // 这一级的阻力/对手
+    var turningPoint: String?   // 跨入该层的转折点
+
+    init(level: Int, obstacle: String, turningPoint: String? = nil) {
+        self.level = level
+        self.obstacle = obstacle
+        self.turningPoint = turningPoint
+    }
+}
+
+/// 信息差：本卷「谁知道什么」从起点到终点的变化
+struct InfoGap: Codable, Equatable {
+    var start: String           // 卷初读者/主角知道什么
+    var end: String             // 卷末将揭示或颠覆什么
+
+    var isEmpty: Bool {
+        start.trimmingCharacters(in: .whitespaces).isEmpty
+            && end.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    init(start: String = "", end: String = "") {
+        self.start = start
+        self.end = end
+    }
+}
+
 final class Volume: Identifiable, ObservableObject, Codable {
     let id: UUID
     @Published var name: String
     @Published var outline: String?                 // 卷纲
+    /// 四维：情绪走向（按节拍，如 压抑→提升→打脸）
+    @Published var emotionArc: [String]?
+    /// 四维：冲突阶梯（核心冲突逐级升高）
+    @Published var conflictLadder: [ConflictRung]?
+    /// 四维：信息差（卷初谁知道什么 → 卷末揭示什么）
+    @Published var infoGap: InfoGap?
     @Published var sortOrder: Int
     weak var novel: Novel?
 
@@ -115,13 +172,19 @@ final class Volume: Identifiable, ObservableObject, Codable {
         self.outline = outline
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, outline, sortOrder, chapters }
+    enum CodingKeys: String, CodingKey {
+        case id, name, outline, emotionArc, conflictLadder, infoGap
+        case sortOrder, chapters
+    }
 
     required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         outline = try c.decodeIfPresent(String.self, forKey: .outline)
+        emotionArc = try c.decodeIfPresent([String].self, forKey: .emotionArc)
+        conflictLadder = try c.decodeIfPresent([ConflictRung].self, forKey: .conflictLadder)
+        infoGap = try c.decodeIfPresent(InfoGap.self, forKey: .infoGap)
         sortOrder = try c.decode(Int.self, forKey: .sortOrder)
         chapters = try c.decode([Chapter].self, forKey: .chapters)
     }
@@ -131,6 +194,9 @@ final class Volume: Identifiable, ObservableObject, Codable {
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encodeIfPresent(outline, forKey: .outline)
+        try c.encodeIfPresent(emotionArc, forKey: .emotionArc)
+        try c.encodeIfPresent(conflictLadder, forKey: .conflictLadder)
+        try c.encodeIfPresent(infoGap, forKey: .infoGap)
         try c.encode(sortOrder, forKey: .sortOrder)
         try c.encode(chapters, forKey: .chapters)
     }
@@ -140,6 +206,8 @@ final class Chapter: Identifiable, ObservableObject, Codable {
     let id: UUID
     @Published var title: String
     @Published var detailedOutline: String?         // 本章细纲
+    /// 场景卡：本章 1-3 个场景的三要素（目标/阻力/钩子）
+    @Published var sceneCards: [SceneCard]?
     @Published var content: String                  // 正文
     @Published var sortOrder: Int
     @Published var wordCount: Int
@@ -159,7 +227,7 @@ final class Chapter: Identifiable, ObservableObject, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, detailedOutline, content, sortOrder, wordCount, updatedAt
+        case id, title, detailedOutline, sceneCards, content, sortOrder, wordCount, updatedAt
         case snapshots, summary
     }
 
@@ -168,6 +236,7 @@ final class Chapter: Identifiable, ObservableObject, Codable {
         id = try c.decode(UUID.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
         detailedOutline = try c.decodeIfPresent(String.self, forKey: .detailedOutline)
+        sceneCards = try c.decodeIfPresent([SceneCard].self, forKey: .sceneCards)
         content = try c.decode(String.self, forKey: .content)
         sortOrder = try c.decode(Int.self, forKey: .sortOrder)
         wordCount = try c.decode(Int.self, forKey: .wordCount)
@@ -181,6 +250,7 @@ final class Chapter: Identifiable, ObservableObject, Codable {
         try c.encode(id, forKey: .id)
         try c.encode(title, forKey: .title)
         try c.encodeIfPresent(detailedOutline, forKey: .detailedOutline)
+        try c.encodeIfPresent(sceneCards, forKey: .sceneCards)
         try c.encode(content, forKey: .content)
         try c.encode(sortOrder, forKey: .sortOrder)
         try c.encode(wordCount, forKey: .wordCount)

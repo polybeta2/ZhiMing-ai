@@ -18,15 +18,34 @@ struct ChatView: View {
     @State private var writingError: String?
     @State private var appeared = false
 
+    /// 助手权限：只读=仅建议；读写=可提议补丁，经用户确认后写入设定（仅写作助手生效）
+    @AppStorage("assistant.accessMode") private var accessModeRaw = AssistantAccessMode.readOnly.rawValue
+    @State private var pendingPatch: AssistantPatch?
+    @State private var appliedNotice: String?
+
     private var isCreation: Bool { thread.purpose == "creation" }
     private var activeProvider: ProviderConfig? { sessionProvider ?? store.defaultProvider }
     private var currentModelName: String {
         activeProvider?.modelName ?? "未配置"
     }
 
+    private var accessMode: AssistantAccessMode {
+        AssistantAccessMode(rawValue: accessModeRaw) ?? .readOnly
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             messageList
+            if !isCreation, let patch = pendingPatch {
+                PatchProposalCard(
+                    summary: patch.summary,
+                    lines: patch.describe(novel: novel),
+                    onApply: { applyPatch(patch) },
+                    onIgnore: { pendingPatch = nil }
+                )
+                .padding(.horizontal, AppTheme.spacing[2])
+                .padding(.vertical, AppTheme.spacing[1])
+            }
             if isCreation, creation.phase == .revising, creation.blueprint != nil {
                 creationActions
             }
@@ -56,6 +75,20 @@ struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: AppTheme.spacing[2]) {
+                    // 助手权限切换（仅写作助手；立项流程不受影响）
+                    if !isCreation {
+                        Menu {
+                            Picker("助手权限", selection: Binding(
+                                get: { accessMode },
+                                set: { accessModeRaw = $0.rawValue }
+                            )) {
+                                Text("只读 · 仅建议").tag(AssistantAccessMode.readOnly)
+                                Text("读写 · 经确认可改设定").tag(AssistantAccessMode.readWrite)
+                            }
+                        } label: {
+                            Image(systemName: accessMode == .readWrite ? "lock.open.fill" : "lock.fill")
+                        }
+                    }
                     Button {
                         resendLastUserMessage()
                     } label: {
@@ -89,6 +122,14 @@ struct ChatView: View {
             }
         }
         .onDisappear { streamTask?.cancel() }
+        .alert("已应用设定修改", isPresented: Binding(
+            get: { appliedNotice != nil },
+            set: { if !$0 { appliedNotice = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(appliedNotice ?? "")
+        }
     }
 
     private var bannerText: String? {
@@ -291,28 +332,55 @@ struct ChatView: View {
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
 
-        var messages: [LLMMessage] = []
+        // R18 与读写协议先算好：注入文本要参与输入预算扣减（v1.7）
+        let r18Text: String?
+        if novel.r18Enabled {
+            let sample = lastUserMessage?.content ?? thread.messages.last(where: { $0.role == "user" })?.content ?? ""
+            r18Text = PromptLibrary.shared.r18Supplement(forInput: sample)
+        } else {
+            r18Text = nil
+        }
+        // 读写模式：注入补丁协议——模型只能“提议”，写入永远由用户在确认卡上显式触发
+        let rwProtocol: String? = accessMode == .readWrite
+            ? PromptLibrary.shared.resolvedText(for: PromptID.assistantReadWrite)
+            : nil
+
         var system = PromptTemplates.writingAssistantSystem(
             title: novel.title,
             synopsis: novel.synopsis,
             styleGuide: novel.styleGuide
         )
-        // R18 增强：按最近一条用户输入的语言注入对应版本规范
-        if novel.r18Enabled {
-            let sample = lastUserMessage?.content ?? thread.messages.last(where: { $0.role == "user" })?.content ?? ""
-            system += "\n\n" + PromptLibrary.shared.r18Supplement(forInput: sample)
+        // 设定上下文：让助手读懂角色状态/世界观/叙事账本/全书结构与最近实际走向（两种模式都注入）
+        let budget = PromptTemplates.adjustedInputBudget(
+            base: provider.contextBudgetChars,
+            injections: r18Text, rwProtocol, provider.systemPromptExtra)
+        let settings = ContextBuilder.buildAssistantContext(novel: novel, budgetChars: budget)
+        if !settings.rendered.isEmpty {
+            system += "\n\n" + settings.rendered
         }
-        messages.append(.init(role: .system, content: system))
+        // R18 增强：按最近一条用户输入的语言注入对应版本规范
+        if let r18 = r18Text {
+            system += "\n\n" + r18
+        }
+        var messages: [LLMMessage] = [.init(role: .system, content: system)]
+        if let rw = rwProtocol {
+            messages = PromptTemplates.applying(providerExtra: rw, to: messages)
+        }
         messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: messages)
+        // 历史单条截断（v1.7）：条数仍取最近 12 条，单条超长保留开头，防止单条巨文撑爆请求
         for message in thread.messages.suffix(12) {
-            messages.append(.init(role: message.role == "user" ? .user : .assistant, content: message.content))
+            messages.append(.init(role: message.role == "user" ? .user : .assistant,
+                                  content: String(message.content.prefix(PromptLimits.historyMessageCap))))
         }
 
-        isStreaming = true
-        streamingText = ""
-        KeepAwake.set(true)
+        // 体量护栏：超过告警线需确认后才进入流式状态（v1.7）
+        let totalChars = messages.totalContentChars
         streamTask?.cancel()
         streamTask = Task { @MainActor in
+            guard await PromptGuard.authorized(totalChars: totalChars) else { return }
+            isStreaming = true
+            streamingText = ""
+            KeepAwake.set(true)
             var raw = ""
             // 流式节流：约 100ms 刷一次 UI，避免逐字重渲染卡顿
             var lastFlush = Date.distantPast
@@ -327,10 +395,10 @@ struct ChatView: View {
                 }
                 streamingText = raw
                 if !Task.isCancelled, !raw.isEmpty {
-                    appendAssistant(raw)
+                    if let patch = archiveWritingReply(raw) { pendingPatch = patch }
                 }
             } catch is CancellationError {
-                if !raw.isEmpty { appendAssistant(raw) }
+                if !raw.isEmpty, let patch = archiveWritingReply(raw) { pendingPatch = patch }
             } catch {
                 writingError = error.localizedDescription
             }
@@ -353,5 +421,63 @@ struct ChatView: View {
         let message = ChatMessage(role: "assistant", content: content)
         message.thread = thread
         thread.messages.append(message)
+    }
+
+    /// 回复入档：读写模式剥离补丁 JSON 并挂起提案卡（空文本不产生气泡）；只读原样入档。
+    /// 新提议会覆盖尚未处理的旧提议。
+    @discardableResult
+    private func archiveWritingReply(_ raw: String) -> AssistantPatch? {
+        guard accessMode == .readWrite else {
+            appendAssistant(raw)
+            return nil
+        }
+        let (patch, cleaned) = AssistantPatch.extract(in: raw)
+        if !cleaned.isEmpty { appendAssistant(cleaned) }
+        return patch
+    }
+
+    private func applyPatch(_ patch: AssistantPatch) {
+        let results = patch.apply(to: novel, store: store)
+        pendingPatch = nil
+        appliedNotice = results.isEmpty ? "补丁中没有可应用的变更。" : results.joined(separator: "\n")
+    }
+}
+
+/// 读写模式的补丁确认卡：列出拟议变更，用户显式「应用」后才写入数据层；
+/// 「忽略」直接丢弃。提案本身不持久化，离开页面即消失。
+private struct PatchProposalCard: View {
+    let summary: String?
+    let lines: [String]
+    let onApply: () -> Void
+    let onIgnore: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+            Label("助手提议修改设定", systemImage: "wand.and.stars")
+                .font(.subheadline.bold())
+            if let summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text("• \(line)")
+                    .font(.caption)
+            }
+            HStack(spacing: AppTheme.spacing[2]) {
+                Button(action: onApply) {
+                    Label("应用", systemImage: "checkmark.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                Button(role: .destructive, action: onIgnore) {
+                    Text("忽略")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(12)
+        .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 }

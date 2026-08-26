@@ -70,6 +70,11 @@ struct ProviderEditView: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
+                    if let httpWarning {
+                        Label(httpWarning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Color.orange)
+                    }
                     SecureField(apiKeyPlaceholder, text: $apiKey)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
@@ -219,6 +224,24 @@ struct ProviderEditView: View {
         .foregroundColor(.accentColor)
     }
 
+    /// 公网 http 告警：本地/局域网明文代理放行；公网 http 会被 ATS 拦截且有窃听风险
+    private var httpWarning: String? {
+        guard let url = URL(string: baseUrl.trimmingCharacters(in: .whitespaces)),
+              url.scheme?.lowercased() == "http",
+              let host = url.host?.lowercased() else { return nil }
+        if Self.isLocalHost(host) { return nil }
+        return "公网 http 明文连接会被 iOS 安全策略（ATS）拦截，API Key 也可能被窃听。建议改用 https；本地代理（127.0.0.1 / 局域网）不受影响。"
+    }
+
+    static func isLocalHost(_ host: String) -> Bool {
+        if host == "localhost" || host.hasSuffix(".local") || host == "::1" || host == "[::1]" { return true }
+        if host.hasPrefix("127.") || host.hasPrefix("10.") || host.hasPrefix("192.168.") { return true }
+        if host.hasPrefix("172."),
+           let octet = host.split(separator: ".").dropFirst().first.flatMap({ Int($0) }),
+           (16...31).contains(octet) { return true }
+        return false
+    }
+
     /// 以当前表单值构造客户端（未保存的 Key 也能测试/取模型）
     private func makeClient() -> OpenAICompatibleClient? {
         guard let url = URL(string: baseUrl.trimmingCharacters(in: .whitespaces)), url.scheme != nil else { return nil }
@@ -289,15 +312,13 @@ struct ProviderEditView: View {
         target.maxTokens = min(max(maxTokens, 256), 1_000_000)
         target.contextBudgetChars = min(max(contextBudgetChars, 2_000), 500_000)
         let extra = systemPromptExtra.trimmingCharacters(in: .whitespacesAndNewlines)
-        target.systemPromptExtra = extra.isEmpty ? nil : extra
+        // 硬上限（v1.7）：附加指令会拼进该提供商的每一次请求，超长部分截断
+        target.systemPromptExtra = extra.isEmpty
+            ? nil
+            : String(extra.prefix(PromptLimits.maxOverrideChars))
         target.isDefault = isDefault
 
         if provider == nil { store.providers.append(target) }
-
-        // Key 只进 Keychain
-        if !apiKey.isEmpty {
-            KeychainHelper.save(key: apiKey.trimmingCharacters(in: .whitespaces), account: target.apiKeyID)
-        }
 
         if isDefault {
             for p in store.providers where p.id != target.id { p.isDefault = false }
@@ -305,7 +326,18 @@ struct ProviderEditView: View {
             target.isDefault = true
         }
         store.save()
-        dismiss()
+
+        // Key 只进 Keychain；写入失败必须让用户知道（否则测试能用、重进即失效）
+        if !apiKey.isEmpty {
+            if KeychainHelper.save(key: apiKey.trimmingCharacters(in: .whitespaces), account: target.apiKeyID) {
+                dismiss()
+            } else {
+                alertMessage = "API Key 写入钥匙串失败：提供商配置已保存，但密钥未存储。请检查后重新编辑并填写密钥。"
+                showAlert = true
+            }
+        } else {
+            dismiss()
+        }
     }
 }
 
