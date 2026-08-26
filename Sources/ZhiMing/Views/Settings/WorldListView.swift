@@ -58,19 +58,23 @@ struct WorldListView: View {
         .sheet(item: $editing) { entry in
             WorldEditView(novel: novel, entry: entry)
         }
-        .confirmationDialog(
-            "删除「\(deleting?.name ?? "")」？",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("删除", role: .destructive) {
-                if let entry = deleting {
-                    novel.worldEntries.removeAll { $0.id == entry.id }
-                    store.save()
-                }
-                deleting = nil
+        // 删除确认用 sheet 内嵌卡（系统弹窗按钮动作不可靠，v1.5.2 教训）
+        .sheet(item: $deleting) { entry in
+            VStack(spacing: AppTheme.spacing[2]) {
+                InlineConfirmCard(
+                    title: "删除「\(entry.name)」？",
+                    message: "该世界观条目将移除，无法恢复。",
+                    confirmLabel: "确认删除",
+                    onConfirm: {
+                        novel.worldEntries.removeAll { $0.id == entry.id }
+                        store.save()
+                        deleting = nil
+                    },
+                    onCancel: { deleting = nil }
+                )
+                Spacer()
             }
-            Button("取消", role: .cancel) { deleting = nil }
+            .padding(AppTheme.spacing[3])
         }
     }
 }

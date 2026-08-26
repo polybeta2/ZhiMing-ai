@@ -64,20 +64,24 @@ struct MessageBubbleView: View {
 
     @ViewBuilder
     private var bubbleBackground: some View {
+        let shape = BubbleShape(isUser: isUser)
         if isUser {
-            RoundedRectangle(cornerRadius: AppTheme.radiusBubble)
-                .fill(.tint.opacity(0.85))
+            // iMessage 惯例：强调色实心渐变气泡，尾侧小圆角
+            shape
+                .fill(LinearGradient(
+                    colors: [Color.accentColor, Color.accentColor.opacity(0.82)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+                .shadow(color: Color.accentColor.opacity(0.28), radius: 6, x: 0, y: 3)
         } else {
-            RoundedRectangle(cornerRadius: AppTheme.radiusBubble)
-                .fill(.ultraThinMaterial)
+            // 不叠淡色毛玻璃：实心次级背景 + 发丝描边，保证任何底色上可读
+            shape
+                .fill(Color(uiColor: .systemBackground))
                 .overlay {
-                    RoundedRectangle(cornerRadius: AppTheme.radiusBubble)
-                        .fill(Color(uiColor: .systemBackground).opacity(AppTheme.bubbleMaterialOpacity * 0.35))
+                    shape.stroke(Color(uiColor: .separator).opacity(0.35), lineWidth: 0.5)
                 }
-                .overlay {
-                    RoundedRectangle(cornerRadius: AppTheme.radiusBubble)
-                        .strokeBorder(.quaternary, lineWidth: 0.5)
-                }
+                .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
         }
     }
 }

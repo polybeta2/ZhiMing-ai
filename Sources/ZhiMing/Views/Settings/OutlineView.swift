@@ -142,20 +142,23 @@ private struct VolumeOutlineSection: View {
                 }
             }
         } header: {
+            // 卷菜单只挂在标题上：行级与区块级菜单共存时 iOS 15 会错配（长按章节弹卷菜单）
             Text(volume.name)
-        }
-        .contextMenu {
-            Button {
-                renameText = volume.name
-                renamingVolume = true
-            } label: {
-                Label("重命名卷", systemImage: "pencil")
-            }
-            Button(role: .destructive) {
-                deletingVolume = true
-            } label: {
-                Label("删除卷", systemImage: "trash")
-            }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .contextMenu {
+                    Button {
+                        renameText = volume.name
+                        renamingVolume = true
+                    } label: {
+                        Label("重命名卷", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        deletingVolume = true
+                    } label: {
+                        Label("删除卷", systemImage: "trash")
+                    }
+                }
         }
         .onAppear {
             syncDraft = true

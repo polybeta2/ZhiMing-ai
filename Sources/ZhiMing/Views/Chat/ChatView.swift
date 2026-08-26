@@ -104,10 +104,17 @@ struct ChatView: View {
                             Text(currentModelName)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                                .frame(width: 90)
+                                .frame(maxWidth: 90)
                         }
                         .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+                        .overlay {
+                            Capsule().strokeBorder(Color(uiColor: .separator).opacity(0.3), lineWidth: 0.5)
+                        }
                     }
+                    .buttonStyle(.zmPress)
                 }
             }
         }
@@ -161,6 +168,7 @@ struct ChatView: View {
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(AppTheme.spacing[2])
+                .animation(AppTheme.Spring.standard, value: thread.messages.count)
             }
             .zmOnChange(of: thread.messages.count) { _ in
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -171,6 +179,7 @@ struct ChatView: View {
             .zmOnChange(of: creation.phase) { _ in
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
+            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         }
     }
 
@@ -437,6 +446,7 @@ struct ChatView: View {
     }
 
     private func applyPatch(_ patch: AssistantPatch) {
+        ZMHaptics.success()
         let results = patch.apply(to: novel, store: store)
         pendingPatch = nil
         appliedNotice = results.isEmpty ? "补丁中没有可应用的变更。" : results.joined(separator: "\n")
@@ -478,6 +488,6 @@ private struct PatchProposalCard: View {
             }
         }
         .padding(12)
-        .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .zmCard(cornerRadius: AppTheme.radiusCard)
     }
 }

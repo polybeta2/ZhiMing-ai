@@ -8,7 +8,6 @@ struct ChapterListView: View {
 
     @State private var renaming: Chapter?
     @State private var renameText = ""
-    @State private var deleting: Chapter?
 
     var body: some View {
         List {
@@ -32,8 +31,7 @@ struct ChapterListView: View {
                     onRename: { chapter in
                         renameText = chapter.title
                         renaming = chapter
-                    },
-                    onDelete: { deleting = $0 }
+                    }
                 )
             }
         }
@@ -62,21 +60,6 @@ struct ChapterListView: View {
                 renaming = nil
             }
         }
-        .confirmationDialog(
-            "删除「\(deleting?.title ?? "")」？",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("删除章节及其快照", role: .destructive) {
-                if let chapter = deleting, let volume = chapter.volume {
-                    volume.chapters.removeAll { $0.id == chapter.id }
-                    volume.normalizeChapterOrder()
-                    store.save()
-                }
-                deleting = nil
-            }
-            Button("取消", role: .cancel) { deleting = nil }
-        }
     }
 
     private func addVolume() {
@@ -94,7 +77,8 @@ private struct VolumeSection: View {
     @ObservedObject var volume: Volume
 
     var onRename: (Chapter) -> Void
-    var onDelete: (Chapter) -> Void
+
+    @State private var deleting: Chapter?
 
     var body: some View {
         Section(volume.name) {
@@ -122,10 +106,27 @@ private struct VolumeSection: View {
                     }
                     .disabled(chapter.id == volume.sortedChapters.last?.id)
                     Button(role: .destructive) {
-                        onDelete(chapter)
+                        deleting = chapter
                     } label: {
                         Label("删除", systemImage: "trash")
                     }
+                }
+
+                // 删除确认内联卡（v1.5.2 教训：系统弹窗按钮动作在本项目目标系统上不可靠；
+                // 该卡与普通视图按钮同级，已被大纲页删卷路径验证可用）
+                if deleting?.id == chapter.id {
+                    InlineConfirmCard(
+                        title: "删除「\(chapter.title)」？",
+                        message: "该章的正文、版本快照与摘要将一并删除，无法恢复。",
+                        confirmLabel: "确认删除章节",
+                        onConfirm: {
+                            deleting = nil
+                            volume.chapters.removeAll { $0.id == chapter.id }
+                            volume.normalizeChapterOrder()
+                            store.save()
+                        },
+                        onCancel: { deleting = nil }
+                    )
                 }
             }
             Button {
@@ -182,6 +183,9 @@ private struct ChapterRow: View {
             Label("已建档", systemImage: "checkmark.seal.fill")
                 .font(.caption2)
                 .foregroundStyle(Color.green)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Color.green.opacity(0.12), in: Capsule())
         } else {
             Label("未建档", systemImage: "circle.dotted")
                 .font(.caption2)

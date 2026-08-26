@@ -44,13 +44,17 @@ struct ChapterEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text(chapter.title)
                     .font(.headline)
-                Spacer()
+                    .lineLimit(1)
+                Spacer(minLength: AppTheme.spacing[1])
                 Text("\(text.count) 字")
                     .font(.caption.monospacedDigit())
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
             }
             .padding(.horizontal, AppTheme.spacing[3])
             .padding(.vertical, AppTheme.spacing[1])
@@ -68,6 +72,7 @@ struct ChapterEditorView: View {
                     onDiscard: { vm.reset() }
                 )
                 .padding(.bottom, AppTheme.spacing[1])
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             } else {
                 if summaryGenerating {
                     HStack {
@@ -89,6 +94,7 @@ struct ChapterEditorView: View {
                 aiToolbar
             }
         }
+        .animation(AppTheme.Spring.standard, value: vm.phase)
         .navigationTitle("编辑")
         .navigationBarTitleDisplayMode(.inline)
         .zmOnChange(of: text) { newValue in
@@ -157,8 +163,11 @@ struct ChapterEditorView: View {
                             .frame(maxWidth: 84)
                     }
                     .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.zmPress)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
 
                 toolButton("续写", icon: "text.badge.plus") {
                     guard ensureProvider() else { return }
@@ -201,10 +210,17 @@ struct ChapterEditorView: View {
         Button(action: action) {
             Label(title, systemImage: icon)
                 .font(.subheadline)
-                .padding(.horizontal, AppTheme.spacing[1])
-                .padding(.vertical, 6)
+                .padding(.horizontal, AppTheme.spacing[2])
+                .padding(.vertical, 7)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.zmPress)
+        .background(
+            Capsule()
+                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+        )
+        .overlay(
+            Capsule().strokeBorder(Color(uiColor: .separator).opacity(0.25), lineWidth: 0.5)
+        )
     }
 
     private func ensureProvider() -> Bool {
@@ -262,6 +278,7 @@ struct ChapterEditorView: View {
     }
 
     private func acceptDraft() {
+        ZMHaptics.success()
         if let last = lastRewrite {
             vm.acceptReplacing(in: chapter, selection: last.selection)
         } else {

@@ -72,7 +72,15 @@ struct DraftCard: View {
             }
         }
         .padding(AppTheme.spacing[2])
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AppTheme.radiusCard))
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.radiusCard)
+                .fill(.regularMaterial)
+                .shadow(color: Color.black.opacity(0.14), radius: 14, x: 0, y: 5)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.radiusCard)
+                .strokeBorder(Color(uiColor: .separator).opacity(0.3), lineWidth: 0.5)
+        )
         .padding(.horizontal, AppTheme.spacing[2])
     }
 }

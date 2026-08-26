@@ -48,22 +48,24 @@ struct SnapshotListView: View {
                 restoring = snapshot
             }
         }
-        .confirmationDialog(
-            "回退到版本 \(restoring?.versionNumber ?? 0)？",
-            isPresented: Binding(get: { restoring != nil }, set: { if !$0 { restoring = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("回退到此版本", role: .destructive) {
-                if let snapshot = restoring {
-                    SnapshotService.restore(chapter, to: snapshot)
-                    store.save()
-                }
-                restoring = nil
-                previewing = nil
+        // 回退确认用 sheet 内嵌卡（系统弹窗按钮动作不可靠，v1.5.2 教训）
+        .sheet(item: $restoring) { snapshot in
+            VStack(spacing: AppTheme.spacing[2]) {
+                InlineConfirmCard(
+                    title: "回退到版本 \(snapshot.versionNumber)？",
+                    message: "回退前会先把当前内容存为新的 restore 版本，历史不会丢失。",
+                    confirmLabel: "回退到此版本",
+                    onConfirm: {
+                        SnapshotService.restore(chapter, to: snapshot)
+                        store.save()
+                        restoring = nil
+                        previewing = nil
+                    },
+                    onCancel: { restoring = nil }
+                )
+                Spacer()
             }
-            Button("取消", role: .cancel) { restoring = nil }
-        } message: {
-            Text("回退前会先把当前内容存为新的 restore 版本，历史不会丢失。")
+            .padding(AppTheme.spacing[3])
         }
     }
 }

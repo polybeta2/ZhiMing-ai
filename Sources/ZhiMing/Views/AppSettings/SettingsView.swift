@@ -25,8 +25,7 @@ struct SettingsView: View {
                             }
                         }
                     } icon: {
-                        Image(systemName: "server.rack")
-                            .foregroundStyle(Color.accentColor)
+                        ZMSettingsIcon(systemName: "server.rack", tint: Color(red: 0.30, green: 0.36, blue: 0.57))
                     }
                 }
             }
@@ -45,8 +44,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     } icon: {
-                        Image(systemName: "paintpalette")
-                            .foregroundStyle(Color.accentColor)
+                        ZMSettingsIcon(systemName: "paintpalette.fill", tint: .purple)
                     }
                 }
             }
@@ -64,8 +62,7 @@ struct SettingsView: View {
                     }
                 } label: {
                     HStack(spacing: AppTheme.spacing[2]) {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .foregroundStyle(showDevWarning ? Color.red : Color.accentColor)
+                        ZMSettingsIcon(systemName: "wrench.and.screwdriver.fill", tint: showDevWarning ? .red : .orange)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(showDevWarning ? "⚠️ 再次点击，确认进入开发者功能" : "开发者功能")
                                 .foregroundColor(showDevWarning ? .red : nil)
@@ -107,7 +104,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text("版本 1.8.2 · 数据仅保存在本机 · 支持 iOS 15+")
+                    Text("版本 1.8.3 · 数据仅保存在本机 · 支持 iOS 15+")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     Text("功能理念参考开源项目「司命 siming-ai」，界面气质参考开源项目 Kelivo。")

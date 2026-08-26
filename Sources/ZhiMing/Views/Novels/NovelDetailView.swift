@@ -96,8 +96,7 @@ private struct NovelSettingsTab: View {
                                 .foregroundColor(.secondary)
                         }
                     } icon: {
-                        Image(systemName: "person.2")
-                            .foregroundStyle(Color.accentColor)
+                        ZMSettingsIcon(systemName: "person.2.fill", tint: .blue)
                     }
                 }
                 NavigationLink(destination: WorldListView(novel: novel)) {
@@ -109,8 +108,7 @@ private struct NovelSettingsTab: View {
                                 .foregroundColor(.secondary)
                         }
                     } icon: {
-                        Image(systemName: "globe.asia.australia")
-                            .foregroundStyle(Color.accentColor)
+                        ZMSettingsIcon(systemName: "globe.asia.australia.fill", tint: .green)
                     }
                 }
                 NavigationLink(destination: OutlineView(novel: novel)) {
@@ -122,8 +120,7 @@ private struct NovelSettingsTab: View {
                                 .foregroundColor(.secondary)
                         }
                     } icon: {
-                        Image(systemName: "list.number")
-                            .foregroundStyle(Color.accentColor)
+                        ZMSettingsIcon(systemName: "list.number", tint: .indigo)
                     }
                 }
             }

@@ -16,40 +16,44 @@ struct NovelListView: View {
 
     var body: some View {
         CompatNavigationView {
-            List {
-                if store.novels.isEmpty {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("开始你的第一部长篇")
-                                .font(.headline)
-                            Text("点击右上角 + ：空白建书，或用一句话创意让 AI 生成完整蓝图。")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+            ScrollView {
+                LazyVStack(spacing: AppTheme.spacing[2]) {
+                    if store.novels.isEmpty {
+                        EmptyStateView(
+                            title: "开始你的第一部长篇",
+                            systemImage: "text.book.closed",
+                            description: "点击右上角 + ：空白建书，或用一句话创意让 AI 生成完整蓝图。"
+                        )
+                        .padding(.top, 48)
+                    }
+                    ForEach(sortedNovels) { novel in
+                        NavigationLink(destination: NovelDetailView(novel: novel)) {
+                            NovelCardRow(novel: novel)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                         }
-                        .padding(.vertical, AppTheme.spacing[2])
-                    }
-                }
-                ForEach(sortedNovels) { novel in
-                    NavigationLink(destination: NovelDetailView(novel: novel)) {
-                        NovelCardRow(novel: novel)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
+                        .buttonStyle(ZMPressableButtonStyle(scale: 0.985))
+                        .zmCard()
+                        .animation(AppTheme.Spring.standard, value: novel.updatedAt)
+                        .contextMenu {
                         Button {
                             renameText = novel.title
                             renamingNovel = novel
                         } label: {
                             Label("重命名", systemImage: "pencil")
                         }
-                        Button(role: .destructive) {
-                            deletingNovel = novel
-                        } label: {
-                            Label("删除", systemImage: "trash")
+                            Button(role: .destructive) {
+                                deletingNovel = novel
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, AppTheme.spacing[3])
+                .padding(.vertical, AppTheme.spacing[1])
             }
-            .listStyle(.plain)
+            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
             .navigationTitle("织命")
             .background(autoOpenLink)
             .toolbar {
@@ -161,23 +165,32 @@ private struct NovelCardRow: View {
 
     var body: some View {
         HStack(spacing: AppTheme.spacing[2]) {
-            Circle()
-                .fill(displayColor.opacity(0.85))
-                .frame(width: 42, height: 42)
+            // 应用图标式圆角方块 + 自上而下的同色渐变（Apple 图标光泽惯例）
+            RoundedRectangle(cornerRadius: 12)
+                .fill(LinearGradient(
+                    colors: [displayColor, displayColor.opacity(0.78)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+                .frame(width: 44, height: 44)
                 .overlay {
-                    Image(systemName: "book.fill")
-                        .font(.system(size: 16))
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white)
                 }
+                .shadow(color: displayColor.opacity(0.35), radius: 6, x: 0, y: 3)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(novel.title)
                         .font(.headline)
                         .lineLimit(1)
                     if novel.r18Enabled {
-                        Text("R18 Enabled")
-                            .font(.caption.bold())
+                        Text("R18")
+                            .font(.caption2.bold())
                             .foregroundColor(.red)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.red.opacity(0.12), in: Capsule())
                     }
                 }
                 Text(subtitle)
@@ -185,12 +198,12 @@ private struct NovelCardRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: AppTheme.spacing[1])
             Text(Self.relative(novel.updatedAt))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, AppTheme.spacing[1])
+        .padding(AppTheme.spacing[2])
         .contentShape(Rectangle())
     }
 

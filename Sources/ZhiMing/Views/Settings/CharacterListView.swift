@@ -45,19 +45,23 @@ struct CharacterListView: View {
         .sheet(item: $editing) { character in
             CharacterEditView(novel: novel, character: character)
         }
-        .confirmationDialog(
-            "删除角色「\(deleting?.name ?? "")」？",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("删除", role: .destructive) {
-                if let character = deleting {
-                    novel.characters.removeAll { $0.id == character.id }
-                    store.save()
-                }
-                deleting = nil
+        // 删除确认用 sheet 内嵌卡（系统弹窗按钮动作不可靠，v1.5.2 教训）
+        .sheet(item: $deleting) { character in
+            VStack(spacing: AppTheme.spacing[2]) {
+                InlineConfirmCard(
+                    title: "删除角色「\(character.name)」？",
+                    message: "该角色的全部字段将移除，无法恢复。",
+                    confirmLabel: "确认删除",
+                    onConfirm: {
+                        novel.characters.removeAll { $0.id == character.id }
+                        store.save()
+                        deleting = nil
+                    },
+                    onCancel: { deleting = nil }
+                )
+                Spacer()
             }
-            Button("取消", role: .cancel) { deleting = nil }
+            .padding(AppTheme.spacing[3])
         }
     }
 }
