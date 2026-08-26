@@ -96,23 +96,20 @@ private struct VolumeOutlineSection: View {
                     .foregroundStyle(.tertiary)
             }
             ForEach(volume.sortedChapters) { chapter in
-                Button {
-                    editingChapter = chapter
-                } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(chapter.title)
-                            .font(.subheadline.weight(.medium))
-                        Text(chapter.detailedOutline ?? "未填写细纲")
-                            .font(.footnote)
-                            .foregroundColor(chapter.detailedOutline == nil ? Color(uiColor: .tertiaryLabel) : .secondary)
-                            .lineLimit(2)
-                    }
-                    // 整行可点：先撑满行宽，再声明命中区域（否则按文字宽度收缩）
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 2)
-                    .contentShape(Rectangle())
+                // 不用 Button+contextMenu 组合：iOS 15 的 List 中该组合的行级菜单会被
+                // 区块级菜单吞掉（表现为长按章节弹出卷菜单）。改为普通视图：
+                // 轻点进入细纲编辑，长按弹出章节菜单。
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(chapter.title)
+                        .font(.subheadline.weight(.medium))
+                    Text(chapter.detailedOutline ?? "未填写细纲")
+                        .font(.footnote)
+                        .foregroundColor(chapter.detailedOutline == nil ? Color(uiColor: .tertiaryLabel) : .secondary)
+                        .lineLimit(2)
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
                 .contextMenu {
                     Button {
                         chapterRenameText = chapter.title
@@ -126,6 +123,7 @@ private struct VolumeOutlineSection: View {
                         Label("删除章节", systemImage: "trash")
                     }
                 }
+                .onTapGesture { editingChapter = chapter }
 
                 // 确认卡紧贴被操作的行，长列表中也一眼可见
                 if deletingChapter?.id == chapter.id {
