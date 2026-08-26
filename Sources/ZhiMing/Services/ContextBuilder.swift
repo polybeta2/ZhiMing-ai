@@ -70,6 +70,14 @@ enum ContextBuilder {
             optional.append(("世界观", "【世界观条目】\n" + world.joined(separator: "\n")))
         }
 
+        // 伏笔提醒（可选层；与角色/世界观同级参与预算裁剪，不占必需层）：
+        let currentVolumeIndex = chapter.volume.flatMap { volume in
+            novel.sortedVolumes.firstIndex(where: { $0.id == volume.id }).map { $0 + 1 }
+        }
+        if let reminders = renderForeshadowReminders(novel: novel, currentVolumeIndex: currentVolumeIndex, currentChapterOrder: chapter.sortOrder) {
+            optional.append(("未回收伏笔", reminders))
+        }
+
         var used = required.joined(separator: "\n\n").count
         var accepted: [String] = []
 
@@ -219,6 +227,44 @@ extension ContextBuilder {
             if !card.hook.isEmpty { parts.append("钩子：\(card.hook)") }
             return "卡\(index + 1)：" + (parts.isEmpty ? "（空）" : parts.joined(separator: "；"))
         }.joined(separator: "\n")
+    }
+
+    /// 未回收伏笔提醒（可选层）：过滤待回收且符合提醒条件的伏笔，埋设老到优先。
+    static func renderForeshadowReminders(novel: Novel, currentVolumeIndex: Int?, currentChapterOrder: Int?) -> String? {
+        let threshold = PromptLimits.foreshadowReminderChapterThreshold
+        var eligible: [(planted: Int, text: String)] = []
+        for fs in novel.foreshadowings where fs.status == .open {
+            let planned = !(fs.plannedResolve?.isEmpty ?? true)
+            let suggested = fs.suggestedResolved
+            var age = 0
+            if let pv = fs.plantedVolumeIndex, let pc = fs.plantedChapterOrder {
+                let plantedGlobal = novel.globalIndex(volumeIndex: pv, chapterOrder: pc)
+                let currentGlobal: Int
+                if let v = currentVolumeIndex, let c = currentChapterOrder {
+                    currentGlobal = novel.globalIndex(volumeIndex: v, chapterOrder: c)
+                } else {
+                    currentGlobal = novel.allChaptersInOrder.count + 1
+                }
+                if plantedGlobal > 0 { age = max(0, currentGlobal - plantedGlobal) }
+                else { age = Int.max }  // 埋设章已不存在：视作很老，提醒
+            }
+            let overdue = age >= threshold
+            guard planned || suggested || overdue else { continue }
+            var line = ""
+            if let pv = fs.plantedVolumeIndex, let pc = fs.plantedChapterOrder { line += "第\(pv)卷第\(pc)章：" }
+            line += fs.title
+            var marks: [String] = []
+            if planned { marks.append("计划回收：\(fs.plannedResolve ?? "")") }
+            if overdue && age != Int.max { marks.append("已逾\(age)章未回收") }
+            if suggested { marks.append("摘要提及可能已回收，待确认") }
+            if !marks.isEmpty { line += "（\(marks.joined(separator: "；"))）" }
+            eligible.append((planted: fs.plantedVolumeIndex ?? fs.plantedChapterOrder ?? Int.max, text: line))
+        }
+        guard !eligible.isEmpty else { return nil }
+        eligible.sort { ($0.planted, $0.text) < ($1.planted, $1.text) }
+        var body = "【未回收伏笔提醒】\n" + eligible.map(\.text).joined(separator: "\n")
+        if body.count > PromptLimits.foreshadowReminderCap { body = String(body.prefix(PromptLimits.foreshadowReminderCap)) }
+        return body
     }
 
     private static func volumeBrief(_ volume: Volume, truncated: inout [String]) -> String {

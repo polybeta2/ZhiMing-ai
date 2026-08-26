@@ -20,6 +20,12 @@ enum PromptLimits {
     static let historyMessageCap = 2_000
     /// 发送前总字符告警线：超过则弹确认框（PromptGuard）
     static let requestWarnChars = 80_000
+    /// 伏笔提醒触发阈值：埋设距今超过 N 章即提醒
+    static let foreshadowReminderChapterThreshold = 8
+    /// 未回收伏笔提醒整段字符上限（可选层，硬裁尾）
+    static let foreshadowReminderCap = 2_000
+    /// 伏笔字段（标题/详情/备注/计划回收）保存时截断线
+    static let foreshadowTextFieldCap = 2_000
 }
 
 // MARK: - 示例标签数据模型（一句话立项增强）
@@ -436,8 +442,9 @@ final class PromptLibrary: ObservableObject {
                 placeholders: [],
                 defaultText: """
                 你负责为长篇小说章节建立档案。读取章节正文后输出 JSON（不要输出其他内容）：
-                {"summary": "120-200字的本章摘要，覆盖主要事件与人物动向", "key_facts": ["本章新确立、后续章节必须记住的事实，每条不超过30字，3-8条"]}
+                {"summary": "120-200字的本章摘要，覆盖主要事件与人物动向", "key_facts": ["本章新确立、后续章节必须记住的事实，每条不超过30字，3-8条"], "new_foreshadowings": [{"title": "伏笔的一句话概括", "detail": "具体内容或原文引用（可选）", "planned_resolve": "作者计划回收位置（可选，如'第三卷末'，不知道则留空）"}], "resolved_foreshadowing_titles": ["本章已回收的伏笔标题（与已有追踪库匹配；不匹配的不要填）"]}
                 关键事实只收录不可逆的设定变化：人物状态改变、关系转折、秘密揭露、物品归属、地点变化等。
+                new_foreshadowings 只收录本章新埋的悬念；resolved_foreshadowing_titles 只填本章明确回收的已有伏笔（标题尽量与库中一致），两者均可为空数组。
                 """
             ),
             BuiltInPrompt(

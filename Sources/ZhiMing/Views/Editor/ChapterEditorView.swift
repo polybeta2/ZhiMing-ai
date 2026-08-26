@@ -352,11 +352,41 @@ struct ChapterEditorView: View {
             }
             summary.summaryText = result.summary
             summary.keyFacts = result.key_facts ?? []
+            applyForeshadowExtractions(from: result)
             store.save()
         } else {
             summaryError = "摘要 JSON 解析失败，请手动修正"
             lastSummaryRaw = raw
             showSummarySheet = true
+        }
+    }
+
+    /// 提取伏笔静默落库：追加 open 伏笔 + 标记 suggestedResolved
+    private func applyForeshadowExtractions(from result: LLMJSONParser.SummaryResult) {
+        // 1) new_foreshadowings 静默追加 open 伏笔（埋设位置=当前章；单次至多 10 条，字段超限前缀截断）
+        guard let novel = chapter.volume?.novel else { return }
+        let volumeIndex = novel.sortedVolumes.firstIndex(where: { $0.id == chapter.volume?.id }).map { $0 + 1 }
+        let chapterOrder = chapter.sortOrder
+        for extraction in (result.new_foreshadowings ?? []).prefix(10) {
+            let title = (extraction.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            novel.foreshadowings.append(Foreshadowing(
+                title: String(title.prefix(PromptLimits.foreshadowTextFieldCap)),
+                detail: (extraction.detail ?? "").isEmpty ? nil : String(extraction.detail!.prefix(PromptLimits.foreshadowTextFieldCap)),
+                plantedVolumeIndex: volumeIndex,
+                plantedChapterOrder: chapterOrder,
+                plannedResolve: (extraction.planned_resolve ?? "").isEmpty ? nil : String(extraction.planned_resolve!.prefix(PromptLimits.foreshadowTextFieldCap))
+            ))
+        }
+        // 2) resolved_foreshadowing_titles 匹配既有 open 伏笔并标 suggestedResolved=true（至多 5 条，不翻转 status）
+        var matched = 0
+        for candidate in (result.resolved_foreshadowing_titles ?? []) where matched < 5 {
+            let target = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !target.isEmpty else { continue }
+            if let index = novel.foreshadowings.firstIndex(where: { $0.status == .open && ($0.title.contains(target) || target.contains($0.title)) }) {
+                novel.foreshadowings[index].suggestedResolved = true
+                matched += 1
+            }
         }
     }
 
