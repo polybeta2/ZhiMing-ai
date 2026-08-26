@@ -126,21 +126,22 @@ private struct VolumeOutlineSection: View {
                         Label("删除章节", systemImage: "trash")
                     }
                 }
-            }
 
-            if let target = deletingChapter {
-                InlineConfirmCard(
-                    title: "删除「\(target.title)」？",
-                    message: "该章的正文、版本快照与摘要将一并删除，无法恢复。",
-                    confirmLabel: "确认删除章节",
-                    onConfirm: {
-                        deletingChapter = nil
-                        volume.chapters.removeAll { $0.id == target.id }
-                        volume.normalizeChapterOrder()
-                        store.save()
-                    },
-                    onCancel: { deletingChapter = nil }
-                )
+                // 确认卡紧贴被操作的行，长列表中也一眼可见
+                if deletingChapter?.id == chapter.id {
+                    InlineConfirmCard(
+                        title: "删除「\(chapter.title)」？",
+                        message: "该章的正文、版本快照与摘要将一并删除，无法恢复。",
+                        confirmLabel: "确认删除章节",
+                        onConfirm: {
+                            deletingChapter = nil
+                            volume.chapters.removeAll { $0.id == chapter.id }
+                            volume.normalizeChapterOrder()
+                            store.save()
+                        },
+                        onCancel: { deletingChapter = nil }
+                    )
+                }
             }
         } header: {
             Text(volume.name)
