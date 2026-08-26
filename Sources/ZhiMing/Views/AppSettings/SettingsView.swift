@@ -107,7 +107,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text("版本 1.1.0 · 数据仅保存在本机 · 支持 iOS 15+")
+                    Text("版本 1.7.0 · 数据仅保存在本机 · 支持 iOS 15+")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     Text("功能理念参考开源项目「司命 siming-ai」，界面气质参考开源项目 Kelivo。")
