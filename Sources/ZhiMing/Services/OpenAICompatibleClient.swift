@@ -12,7 +12,7 @@ final class OpenAICompatibleClient: LLMClient {
         self.model = model
     }
 
-    func streamChat(messages: [LLMMessage], config: GenerationConfig) -> AsyncThrowingStream<String, Error> {
+    func streamChat(messages: [LLMMessage], config: GenerationConfig) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -33,8 +33,8 @@ final class OpenAICompatibleClient: LLMClient {
                         guard line.hasPrefix("data:") else { continue }
                         let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
                         if payload == "[DONE]" { break }
-                        if let delta = Self.extractDelta(payload) {
-                            if !delta.isEmpty { continuation.yield(delta) }
+                        for event in Self.extractEvents(payload) {
+                            continuation.yield(event)
                         }
                     }
                     continuation.finish()
@@ -52,7 +52,9 @@ final class OpenAICompatibleClient: LLMClient {
             config: GenerationConfig(temperature: 0, maxTokens: 32)
         ).makeAsyncIterator()
         var text = ""
-        while let delta = try await iterator.next() { text += delta }
+        while let event = try await iterator.next() {
+            if case .content(let delta) = event { text += delta }
+        }
         return text
     }
 
@@ -101,11 +103,21 @@ final class OpenAICompatibleClient: LLMClient {
         return request
     }
 
-    private static func extractDelta(_ json: String) -> String? {
+    /// 一帧可能同时含思维链与正文 delta，各自非空才产出事件
+    private static func extractEvents(_ json: String) -> [StreamEvent] {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = obj["choices"] as? [[String: Any]],
-              let delta = choices.first?["delta"] as? [String: Any] else { return nil }
-        return delta["content"] as? String
+              let delta = choices.first?["delta"] as? [String: Any] else { return [] }
+        var events: [StreamEvent] = []
+        // 思维链：OpenAI 兼容生态事实标准为 reasoning_content，部分网关用 reasoning
+        if let reasoning = (delta["reasoning_content"] ?? delta["reasoning"]) as? String,
+           !reasoning.isEmpty {
+            events.append(.reasoning(reasoning))
+        }
+        if let content = delta["content"] as? String, !content.isEmpty {
+            events.append(.content(content))
+        }
+        return events
     }
 }

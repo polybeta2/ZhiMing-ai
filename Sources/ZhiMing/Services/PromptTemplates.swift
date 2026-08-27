@@ -16,6 +16,17 @@ enum PromptTemplates {
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
+    /// 从零撰写整章（章节正文为空时）
+    static func writing(context: BuiltContext, wordTarget: Int, extra: String?) -> [LLMMessage] {
+        let system = PromptLibrary.shared.resolvedText(for: PromptID.writing)
+        let user = """
+        \(context.rendered)
+
+        请撰写约 \(wordTarget) 字的完整章节。\((extra?.isEmpty == false) ? "附加要求：\(extra!)" : "")
+        """
+        return [.init(role: .system, content: system), .init(role: .user, content: user)]
+    }
+
     static func rewrite(mode: String, selection: String, instruction: String?) -> [LLMMessage] {
         // 「去AI味」走专属模板；其余模式共用通用改写模板
         let system: String
@@ -41,15 +52,77 @@ enum PromptTemplates {
                 .init(role: .user, content: "【\(title)】\n\(content)")]
     }
 
-    /// supplement：由「已启用示例标签 + 输入关键词命中」计算出的创作方向补充，
-    /// 拼接在系统提示词之后、用户输入之前（不改动用户原始创意文本）。
-    static func creationBlueprint(brief: String, supplement: String? = nil) -> [LLMMessage] {
-        var system = PromptLibrary.shared.resolvedText(for: PromptID.creationBlueprint)
+    // MARK: 分阶段立项
+
+    /// supplement：R18 规范等补充约束，拼接在系统提示词之后、用户输入之前。
+    static func creationClarify(brief: String, qaHistory: String, supplement: String?) -> [LLMMessage] {
+        var system = PromptLibrary.shared.resolvedText(for: PromptID.creationClarify)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
             system += "\n\n" + supplement
         }
-        return [.init(role: .system, content: system), .init(role: .user, content: brief)]
+        var user = "【创意】\n\(brief)"
+        if !qaHistory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            user += "\n\n【此前问答】\n\(qaHistory.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+        return [.init(role: .system, content: system), .init(role: .user, content: user)]
+    }
+
+    /// feedback：结构提案阶段的修改意见（nil = 首次规划）
+    static func creationStructure(brief: String, qaHistory: String, feedback: String?, supplement: String?) -> [LLMMessage] {
+        var system = PromptLibrary.shared.resolvedText(for: PromptID.creationStructure)
+        if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !supplement.isEmpty {
+            system += "\n\n" + supplement
+        }
+        var user = "【创意】\n\(brief)"
+        if !qaHistory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            user += "\n\n【问答记录】\n\(qaHistory.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+        if let feedback = feedback?.trimmingCharacters(in: .whitespacesAndNewlines), !feedback.isEmpty {
+            user += "\n\n【修改意见】\n\(feedback)"
+        }
+        return [.init(role: .system, content: system), .init(role: .user, content: user)]
+    }
+
+    /// structureJSON：用户已确认的卷章结构；feedback：基础蓝图阶段的修改意见（重生成用）
+    static func creationFoundation(brief: String, qaHistory: String, structureJSON: String,
+                                   feedback: String?, supplement: String?) -> [LLMMessage] {
+        var system = PromptLibrary.shared.resolvedText(for: PromptID.creationFoundation)
+        if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !supplement.isEmpty {
+            system += "\n\n" + supplement
+        }
+        var user = """
+        【创意】
+        \(brief)
+        """
+        if !qaHistory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            user += "\n\n【问答记录】\n\(qaHistory.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+        user += "\n\n【已确认的卷章结构】\n\(structureJSON)"
+        if let feedback = feedback?.trimmingCharacters(in: .whitespacesAndNewlines), !feedback.isEmpty {
+            user += "\n\n【修改意见】\n\(feedback)"
+        }
+        return [.init(role: .system, content: system), .init(role: .user, content: user)]
+    }
+
+    /// 细纲批次：只为 targets 中的章节生成细纲
+    static func creationChapterBatch(context: String, targets: [String], supplement: String?) -> [LLMMessage] {
+        var system = PromptLibrary.shared.resolvedText(for: PromptID.creationChapterBatch)
+        if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !supplement.isEmpty {
+            system += "\n\n" + supplement
+        }
+        let list = targets.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        let user = """
+        【作品背景】
+        \(context)
+
+        【本批待生成章节】
+        \(list)
+        """
+        return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
     /// supplement：R18 规范等补充约束，拼接在系统提示词之后、用户输入之前。

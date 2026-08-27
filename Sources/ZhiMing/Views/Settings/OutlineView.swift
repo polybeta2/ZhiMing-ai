@@ -233,10 +233,13 @@ private struct VolumeOutlineSection: View {
 
         switch vm.phase {
         case .streaming:
-            Text(vm.draft.isEmpty ? "正在生成本卷卷纲…" : vm.draft)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(10)
+            VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+                StreamingStatusView(tracker: vm.progress, showsOutputting: false)
+                Text(vm.draft.isEmpty ? "正在生成本卷卷纲…" : vm.draft)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(10)
+            }
         case .done where !vm.draft.isEmpty:
             VStack(spacing: AppTheme.spacing[1]) {
                 draftCard
@@ -459,10 +462,13 @@ private struct ChapterOutlineEditSheet: View {
 
         switch vm.phase {
         case .streaming:
-            Text(vm.draft.isEmpty ? "正在生成本章细纲…" : vm.draft)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(10)
+            VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+                StreamingStatusView(tracker: vm.progress, showsOutputting: false)
+                Text(vm.draft.isEmpty ? "正在生成本章细纲…" : vm.draft)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(10)
+            }
         case .done where !vm.draft.isEmpty:
             VStack(spacing: AppTheme.spacing[1]) {
                 draftCard

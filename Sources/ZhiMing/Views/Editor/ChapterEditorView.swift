@@ -27,9 +27,10 @@ struct ChapterEditorView: View {
     @State private var showSummarySheet = false
     @State private var lastSummaryRaw = ""
     @State private var summaryTask: Task<Void, Never>?
+    @StateObject private var summaryProgress = StreamProgressTracker()
 
     // 记录最近一次生成参数，供「重新生成」复用
-    @State private var lastContinue: (wordTarget: Int, instruction: String?)?
+    @State private var lastContinue: (isNewChapter: Bool, wordTarget: Int, instruction: String?)?
     @State private var lastRewrite: (mode: String, selection: String, instruction: String?)?
 
     init(chapter: Chapter) {
@@ -75,11 +76,8 @@ struct ChapterEditorView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             } else {
                 if summaryGenerating {
-                    HStack {
-                        ProgressView()
-                        Text("正在生成章节摘要…")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
+                    HStack(spacing: AppTheme.spacing[2]) {
+                        StreamingStatusView(tracker: summaryProgress)
                         Spacer()
                     }
                     .padding(.horizontal, AppTheme.spacing[3])
@@ -112,7 +110,7 @@ struct ChapterEditorView: View {
             saveNow()
         }
         .sheet(isPresented: $showContinueSheet) {
-            ContinueWritingSheet { wordTarget, instruction in
+            ContinueWritingSheet(isNewChapter: text.count == 0, hasOutline: chapter.detailedOutline?.isEmpty == false) { wordTarget, instruction in
                 startContinue(wordTarget: wordTarget, instruction: instruction)
             }
         }
@@ -169,7 +167,8 @@ struct ChapterEditorView: View {
                 .buttonStyle(.zmPress)
                 .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
 
-                toolButton("续写", icon: "text.badge.plus") {
+                // 字数为 0 时是「撰写」（从零成章），否则「续写」
+                toolButton(text.count == 0 ? "撰写" : "续写", icon: text.count == 0 ? "square.and.pencil" : "text.badge.plus") {
                     guard ensureProvider() else { return }
                     showContinueSheet = true
                 }
@@ -235,10 +234,11 @@ struct ChapterEditorView: View {
 
     private func startContinue(wordTarget: Int, instruction: String?) {
         guard let provider = activeProvider, let novel else { return }
-        lastContinue = (wordTarget, instruction)
+        let isNewChapter = text.count == 0
+        lastContinue = (isNewChapter, wordTarget, instruction)
         lastRewrite = nil
         vm.start(
-            mode: .continueWriting(wordTarget: wordTarget),
+            mode: isNewChapter ? .writing(wordTarget: wordTarget) : .continueWriting(wordTarget: wordTarget),
             chapter: chapter,
             novel: novel,
             provider: provider,
@@ -325,9 +325,11 @@ struct ChapterEditorView: View {
                 return
             }
             var raw = ""
+            summaryProgress.begin()
             do {
-                for try await delta in client.streamChat(messages: messages, config: config) {
-                    raw += delta
+                for try await event in client.streamChat(messages: messages, config: config) {
+                    summaryProgress.handle(event)
+                    if case .content(let delta) = event { raw += delta }
                 }
                 if !Task.isCancelled { applySummaryResult(raw) }
             } catch is CancellationError {
@@ -335,6 +337,7 @@ struct ChapterEditorView: View {
             } catch {
                 if !Task.isCancelled { summaryError = error.localizedDescription }
             }
+            summaryProgress.finish()
             if !Task.isCancelled { summaryGenerating = false }
         }
     }
@@ -409,32 +412,61 @@ struct ChapterEditorView: View {
     }
 }
 
-// MARK: - 续写参数 Sheet
+// MARK: - 撰写/续写参数 Sheet
 
 private struct ContinueWritingSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var wordTarget = 1500
+    @State private var wordTarget: Int
     @State private var instruction = ""
+    let isNewChapter: Bool
+    var hasOutline: Bool = true
     let onStart: (Int, String?) -> Void
 
-    private let options = [800, 1500, 2500]
+    /// 撰写：1500~4500 步进 500；续写：快捷 800/1500/2500
+    private let newChapterOptions = Array(stride(from: 1500, through: 4500, by: 500))
+    private let continueOptions = [800, 1500, 2500]
+
+    init(isNewChapter: Bool, hasOutline: Bool = true, onStart: @escaping (Int, String?) -> Void) {
+        self.isNewChapter = isNewChapter
+        self.hasOutline = hasOutline
+        self.onStart = onStart
+        _wordTarget = State(initialValue: isNewChapter ? 2000 : 1500)
+    }
 
     var body: some View {
         CompatNavigationView {
             Form {
-                Section("续写字数") {
-                    Picker("目标字数", selection: $wordTarget) {
-                        ForEach(options, id: \.self) { option in
-                            Text("约 \(option) 字").tag(option)
-                        }
+                if isNewChapter && !hasOutline {
+                    Section {
+                        Label("本章还没有细纲，撰写质量会大打折扣。建议先到「大纲」页生成本章细纲。", systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundColor(.orange)
                     }
-                    .pickerStyle(.segmented)
+                }
+                Section(isNewChapter ? "撰写字数" : "续写字数") {
+                    if isNewChapter {
+                        // 7 档放不下 segmented，用默认 menu 样式
+                        Picker("目标字数", selection: $wordTarget) {
+                            ForEach(newChapterOptions, id: \.self) { option in
+                                Text("约 \(option) 字").tag(option)
+                            }
+                        }
+                    } else {
+                        Picker("目标字数", selection: $wordTarget) {
+                            ForEach(continueOptions, id: \.self) { option in
+                                Text("约 \(option) 字").tag(option)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
                 }
                 Section("附加指令（可选）") {
-                    MultilineField(text: $instruction, placeholder: "例如：本段以对话推进，减少环境描写…", minHeight: 56)
+                    MultilineField(text: $instruction, placeholder: isNewChapter
+                        ? "例如：开篇以对话切入，节奏快一些…"
+                        : "例如：本段以对话推进，减少环境描写…", minHeight: 56)
                 }
             }
-            .navigationTitle("AI 续写")
+            .navigationTitle(isNewChapter ? "AI 撰写" : "AI 续写")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

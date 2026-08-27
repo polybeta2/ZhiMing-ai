@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// 通用聊天页（立项与写作助手共用）
-/// 能力：消息持久化到 ChatThread、流式气泡、停止、重发最后一条、会话内切换模型
+/// 立项：分阶段共创（澄清提问 → 结构提案 → 基础蓝图 → 细纲分批 → 创建作品）
+/// 能力：消息持久化到 ChatThread、流式状态可视化、停止、重发最后一条、会话内切换模型
 struct ChatView: View {
     @EnvironmentObject private var store: AppStore
     let novel: Novel
@@ -14,7 +15,7 @@ struct ChatView: View {
     @State private var showModelSelector = false
     @State private var sessionProvider: ProviderConfig?
     @StateObject private var creation = CreationSessionViewModel()
-    @State private var lastCreationWasRevise = false
+    @StateObject private var assistantProgress = StreamProgressTracker()
     @State private var writingError: String?
     @State private var appeared = false
 
@@ -28,6 +29,8 @@ struct ChatView: View {
     private var currentModelName: String {
         activeProvider?.modelName ?? "未配置"
     }
+    /// 任一流式进行中（含立项 VM 的流）
+    private var anyStreaming: Bool { isStreaming || creation.isStreaming }
 
     private var accessMode: AssistantAccessMode {
         AssistantAccessMode(rawValue: accessModeRaw) ?? .readOnly
@@ -46,7 +49,7 @@ struct ChatView: View {
                 .padding(.horizontal, AppTheme.spacing[2])
                 .padding(.vertical, AppTheme.spacing[1])
             }
-            if isCreation, creation.phase == .revising, creation.blueprint != nil {
+            if isCreation {
                 creationActions
             }
         }
@@ -63,8 +66,8 @@ struct ChatView: View {
                 }
                 ChatInputBar(
                     text: $input,
-                    isStreaming: isStreaming,
-                    placeholder: isCreation ? "输入创意或修改意见…" : "向写作助手提问…",
+                    isStreaming: anyStreaming,
+                    placeholder: isCreation ? "输入创意或回答问题…" : "向写作助手提问…",
                     onSend: sendCurrentInput,
                     onStop: stopStreaming
                 )
@@ -94,7 +97,7 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .disabled(isStreaming || lastUserMessage == nil)
+                    .disabled(anyStreaming || lastUserMessage == nil)
 
                     Button {
                         showModelSelector = true
@@ -124,11 +127,17 @@ struct ChatView: View {
         .onAppear {
             guard !appeared else { return }
             appeared = true
+            creation.onStreamSettled = { kind, message, raw, parsed in
+                settleCreation(kind: kind, message: message, raw: raw, parsed: parsed)
+            }
             if isCreation, thread.messages.isEmpty, input.isEmpty, !novel.synopsis.isEmpty {
                 input = novel.synopsis
             }
         }
-        .onDisappear { streamTask?.cancel() }
+        .onDisappear {
+            streamTask?.cancel()
+            creation.stop()
+        }
         .alert("已应用设定修改", isPresented: Binding(
             get: { appliedNotice != nil },
             set: { if !$0 { appliedNotice = nil } }
@@ -150,20 +159,38 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: AppTheme.spacing[2]) {
-                    if thread.messages.isEmpty && !isStreaming {
+                    if thread.messages.isEmpty && !anyStreaming {
                         emptyHint
                     }
                     ForEach(thread.messages) { message in
                         MessageBubbleView(role: message.role, text: message.content)
                             .id(message.id)
                     }
+                    // 写作助手流式：等待/思考阶段显示状态行，输出阶段恢复文本气泡
                     if isStreaming {
-                        MessageBubbleView(role: "assistant", text: streamingText, isStreaming: true)
-                            .id("streaming")
+                        if assistantProgress.stage == .outputting {
+                            MessageBubbleView(role: "assistant", text: streamingText, isStreaming: true)
+                                .id("streaming")
+                        } else {
+                            StreamingStatusView(tracker: assistantProgress, showsOutputting: false)
+                                .id("streaming")
+                        }
                     }
-                    if isCreation, creation.blueprint != nil, creation.phase == .revising {
+                    // 立项流式：JSON 不直接显示，只展示统计状态
+                    if isCreation, creation.isStreaming {
+                        StreamingStatusView(tracker: creation.progress)
+                            .id("creationStreaming")
+                    }
+                    if isCreation, creation.phase == .proposing, creation.proposal != nil {
+                        StructureProposalCard(vm: creation)
+                            .id("proposal")
+                    }
+                    if isCreation, creation.blueprint != nil,
+                       creation.phase == .blueprintReady || creation.phase == .outlining {
                         BlueprintCardsView(vm: creation)
                             .id("blueprint")
+                        OutlineBatchControls(vm: creation)
+                            .id("outlineControls")
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -179,6 +206,12 @@ struct ChatView: View {
             .zmOnChange(of: creation.phase) { _ in
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
+            .zmOnChange(of: creation.isStreaming) { _ in
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .zmOnChange(of: creation.outlineDone) { _ in
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
             .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         }
     }
@@ -189,23 +222,29 @@ struct ChatView: View {
                 title: isCreation ? "立项对话" : "写作助手",
                 systemImage: isCreation ? "wand.and.stars" : "bubble.left.and.bubble.right",
                 description: isCreation
-                    ? "输入一句话创意，AI 生成可编辑的作品蓝图"
+                    ? "输入一句话创意，AI 会先问你几个问题理清思路，再一起定结构、出蓝图、分批生成细纲"
                     : "就这部作品向助手提问：剧情走向、人物动机、写作技法…"
             )
             .padding(.top, AppTheme.spacing[4])
         }
     }
 
+    // MARK: - 立项阶段操作区
+
     private var creationActions: some View {
-        HStack {
-            Button {
-                confirmBlueprint()
-            } label: {
-                Label("创建作品", systemImage: "checkmark.seal.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, AppTheme.spacing[1])
+        VStack(spacing: AppTheme.spacing[1]) {
+            CreationStageIndicator(phase: creation.phase)
+            if creation.blueprint != nil,
+               creation.phase == .blueprintReady || creation.phase == .outlining {
+                Button {
+                    confirmBlueprint()
+                } label: {
+                    Label("创建作品", systemImage: "checkmark.seal.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, AppTheme.spacing[1])
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
         }
         .padding(.horizontal, AppTheme.spacing[3])
         .padding(.vertical, AppTheme.spacing[1])
@@ -258,73 +297,52 @@ struct ChatView: View {
     private func routeCreation(text: String) {
         guard let provider = activeProvider else { return }
 
-        if creation.phase == .revising {
+        switch creation.phase {
+        case .collecting:
+            // 智能注入：仅「已启用标签」且输入命中其关键词时，才附加预设内容
+            var parts: [String] = []
+            if let tags = PromptLibrary.shared.matchedSupplement(enabledIDs: novel.enabledTagIDs, input: text) {
+                parts.append(tags)
+            }
+            if novel.r18Enabled {
+                parts.append(PromptLibrary.shared.r18Supplement(forInput: text))
+            }
+            let supplement = parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+            creation.sendCollecting(text: text, provider: provider, supplement: supplement)
+        case .proposing:
+            creation.sendProposalFeedback(text)
+        case .blueprintReady, .outlining, .confirmed:
             // 已有蓝图：作为修订意见（R18 书籍同样携带对应语言规范）
-            lastCreationWasRevise = true
-            beginCreationStream()
             var reviseSupplement: String?
             if novel.r18Enabled {
                 reviseSupplement = PromptLibrary.shared.r18Supplement(forInput: text)
             }
             creation.revise(feedback: text, provider: provider, supplement: reviseSupplement)
-        } else {
-            // 无蓝图：作为创意生成蓝图（「重新生成」回退到最初创意）
-            let brief = (text.contains("重新生成") && !novel.synopsis.isEmpty) ? novel.synopsis : text
-            // 智能注入：仅「已启用标签」且输入命中其关键词时，才附加预设内容
-            var parts: [String] = []
-            if let tags = PromptLibrary.shared.matchedSupplement(enabledIDs: novel.enabledTagIDs, input: brief) {
-                parts.append(tags)
-            }
-            if novel.r18Enabled {
-                parts.append(PromptLibrary.shared.r18Supplement(forInput: brief))
-            }
-            let supplement = parts.isEmpty ? nil : parts.joined(separator: "\n\n")
-            lastCreationWasRevise = false
-            beginCreationStream()
-            creation.generateBlueprint(brief: brief, provider: provider, supplement: supplement)
         }
     }
 
-    private func beginCreationStream() {
-        isStreaming = true
-        streamingText = ""
-        creation.onStreamSettled = { raw, parsed in
-            settleCreation(raw: raw, parsed: parsed)
-        }
-        observeCreationStream()
-    }
-
-    /// 把 VM 的 draft 镜像到气泡
-    private func observeCreationStream() {
-        streamTask?.cancel()
-        streamTask = Task { @MainActor in
-            while isStreaming {
-                streamingText = creation.draft
-                try? await Task.sleep(nanoseconds: 80_000_000)
-            }
-        }
-    }
-
-    private func settleCreation(raw: String, parsed: Bool) {
-        isStreaming = false
-        streamTask?.cancel()
-        streamingText = ""
-
-        if parsed {
-            let title = creation.blueprint?.title_suggestion ?? novel.title
-            let content = lastCreationWasRevise
-                ? "已按你的意见修订蓝图，继续查看卡片或提出更多意见。"
-                : "已生成《\(title)》的蓝图，请在卡片中审阅与编辑；也可以直接告诉我修改意见。"
-            appendAssistant(content)
-        } else if !raw.isEmpty {
+    private func settleCreation(kind: CreationSessionViewModel.StreamKind,
+                                message: String?,
+                                raw: String,
+                                parsed: Bool) {
+        if let message {
+            appendAssistant(message)
+        } else if !parsed, !raw.isEmpty,
+                  kind == .structure || kind == .foundation || kind == .revise {
+            // 解析失败：展示原始输出供检查
             appendAssistant(raw)
         }
         store.save()
     }
 
     private func confirmBlueprint() {
+        let pending = creation.outlineTotal - creation.outlineDone
         creation.confirm(into: novel, store: store)
-        appendAssistant("作品《\(novel.title)》已创建：角色、世界观与卷章结构已就位。去「章节」页签开始写作吧！")
+        var text = "作品《\(novel.title)》已创建：角色、世界观与卷章结构已就位。去「章节」页签开始写作吧！"
+        if pending > 0 {
+            text += "（\(pending) 章细纲未生成，可稍后在「大纲」页补充）"
+        }
+        appendAssistant(text)
         store.save()
     }
 
@@ -389,17 +407,21 @@ struct ChatView: View {
             guard await PromptGuard.authorized(totalChars: totalChars) else { return }
             isStreaming = true
             streamingText = ""
+            assistantProgress.begin()
             KeepAwake.set(true)
             var raw = ""
             // 流式节流：约 100ms 刷一次 UI，避免逐字重渲染卡顿
             var lastFlush = Date.distantPast
             do {
-                for try await delta in client.streamChat(messages: messages, config: config) {
-                    raw += delta
-                    let now = Date()
-                    if now.timeIntervalSince(lastFlush) >= 0.1 {
-                        streamingText = raw
-                        lastFlush = now
+                for try await event in client.streamChat(messages: messages, config: config) {
+                    assistantProgress.handle(event)
+                    if case .content(let delta) = event {
+                        raw += delta
+                        let now = Date()
+                        if now.timeIntervalSince(lastFlush) >= 0.1 {
+                            streamingText = raw
+                            lastFlush = now
+                        }
                     }
                 }
                 streamingText = raw
@@ -411,6 +433,7 @@ struct ChatView: View {
             } catch {
                 writingError = error.localizedDescription
             }
+            assistantProgress.finish()
             isStreaming = false
             KeepAwake.set(false)
             store.save()
@@ -453,8 +476,158 @@ struct ChatView: View {
     }
 }
 
-/// 读写模式的补丁确认卡：列出拟议变更，用户显式「应用」后才写入数据层；
-/// 「忽略」直接丢弃。提案本身不持久化，离开页面即消失。
+// MARK: - 立项阶段指示
+
+private struct CreationStageIndicator: View {
+    let phase: CreationSessionViewModel.Phase
+
+    private var stages: [(name: String, index: Int)] {
+        [("思路", 0), ("结构", 1), ("蓝图", 2), ("细纲", 3), ("完成", 4)]
+    }
+    private var currentIndex: Int {
+        switch phase {
+        case .collecting: return 0
+        case .proposing: return 1
+        case .blueprintReady: return 2
+        case .outlining: return 3
+        case .confirmed: return 4
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: AppTheme.spacing[1]) {
+            ForEach(stages, id: \.name) { stage in
+                HStack(spacing: 3) {
+                    if stage.index < currentIndex {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2)
+                    }
+                    Text(stage.name)
+                        .font(.caption)
+                }
+                .foregroundStyle(stage.index <= currentIndex ? Color.accentColor : Color.secondary)
+                if stage.index < stages.count - 1 {
+                    Text("›")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+        }
+    }
+}
+
+// MARK: - 结构提案卡
+
+private struct StructureProposalCard: View {
+    @ObservedObject var vm: CreationSessionViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.spacing[2]) {
+            Label("结构提案（可先调整再确认）", systemImage: "square.grid.3x3")
+                .font(.subheadline.weight(.semibold))
+
+            if let concept = vm.proposal?.concept, !concept.isEmpty {
+                Text(concept)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: AppTheme.spacing[1]) {
+                let volumes = vm.proposal?.volumes ?? []
+                let total = volumes.reduce(0) { $0 + ($1.chapter_count ?? 0) }
+                ForEach(Array(volumes.enumerated()), id: \.offset) { _, volume in
+                    HStack {
+                        Text(volume.name ?? "未命名卷")
+                            .font(.subheadline)
+                        Spacer()
+                        Text("\(volume.chapter_count ?? 0) 章")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                HStack {
+                    Text("合计")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text("\(volumes.count) 卷 · \(total) 章")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(AppTheme.spacing[2])
+            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+
+            Button {
+                vm.confirmProposal()
+            } label: {
+                Label("确认结构，生成蓝图", systemImage: "checkmark.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(vm.isStreaming)
+        }
+        .padding(AppTheme.spacing[2])
+        .zmCard(cornerRadius: AppTheme.radiusCard)
+    }
+}
+
+// MARK: - 细纲分批控制卡
+
+private struct OutlineBatchControls: View {
+    @ObservedObject var vm: CreationSessionViewModel
+
+    private var allDone: Bool { vm.outlineDone >= vm.outlineTotal && vm.outlineTotal > 0 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+            Label("细纲进度 \(vm.outlineDone)/\(vm.outlineTotal) 章", systemImage: "chart.bar.doc.horizontal")
+                .font(.subheadline.weight(.semibold))
+
+            if allDone {
+                Label("细纲已全部生成，点下方「创建作品」落库", systemImage: "checkmark.seal.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.green)
+            } else {
+                HStack(spacing: AppTheme.spacing[2]) {
+                    Picker("每轮", selection: $vm.chaptersPerBatch) {
+                        Text("1 章").tag(1)
+                        Text("2 章").tag(2)
+                        Text("3 章").tag(3)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 150)
+                    Toggle("自动连续", isOn: $vm.autoContinue)
+                        .font(.footnote)
+                }
+                if vm.isStreaming {
+                    Button {
+                        vm.stop()
+                    } label: {
+                        Label("停止生成", systemImage: "stop.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button {
+                        vm.generateNextBatch()
+                    } label: {
+                        Label("生成下一批细纲", systemImage: "wand.and.stars")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(AppTheme.spacing[2])
+        .zmCard(cornerRadius: AppTheme.radiusCard)
+    }
+}
+
+// MARK: - 读写模式的补丁确认卡
+
+/// 列出拟议变更，用户显式「应用」后才写入数据层；「忽略」直接丢弃。
+/// 提案本身不持久化，离开页面即消失。
 private struct PatchProposalCard: View {
     let summary: String?
     let lines: [String]

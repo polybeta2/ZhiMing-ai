@@ -6,12 +6,14 @@ import Combine
 @MainActor
 final class WritingSessionViewModel: ObservableObject {
     enum Phase: Equatable { case idle, streaming, done }
-    enum Mode { case continueWriting(wordTarget: Int), rewrite(mode: String, selection: String) }
+    enum Mode { case writing(wordTarget: Int), continueWriting(wordTarget: Int), rewrite(mode: String, selection: String) }
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var draft = ""
     @Published private(set) var truncatedSections: [String] = []
     @Published var errorMessage: String?
+    /// 流式过程可视化（等待首Token/深度思考/输出统计）
+    let progress = StreamProgressTracker()
     private var streamTask: Task<Void, Never>?
 
     func start(mode: Mode, chapter: Chapter, novel: Novel, provider: ProviderConfig, instruction: String?) {
@@ -40,6 +42,14 @@ final class WritingSessionViewModel: ObservableObject {
 
         let baseMessages: [LLMMessage]
         switch mode {
+        case .writing(let wordTarget):
+            // 从零撰写整章：content 为空时正文末尾段自然为空，上下文装配与续写共用
+            let budget = PromptTemplates.adjustedInputBudget(
+                base: provider.contextBudgetChars,
+                injections: r18Text, provider.systemPromptExtra)
+            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget)
+            truncatedSections = context.truncatedSections
+            baseMessages = PromptTemplates.writing(context: context, wordTarget: wordTarget, extra: instruction)
         case .continueWriting(let wordTarget):
             // 动态注入（R18/附加指令）先占用预算，剩余额度才装配上下文
             let budget = PromptTemplates.adjustedInputBudget(
@@ -74,17 +84,21 @@ final class WritingSessionViewModel: ObservableObject {
                                 config: GenerationConfig) {
         phase = .streaming
         KeepAwake.set(true)   // 生成中保持屏幕常亮
+        progress.begin()
         streamTask = Task {
             // 流式节流：delta 先进缓冲，约 100ms 刷新一次发布属性，避免逐字重渲染卡顿
             var accumulated = ""
             var lastFlush = Date.distantPast
             do {
-                for try await delta in client.streamChat(messages: messages, config: config) {
-                    accumulated += delta
-                    let now = Date()
-                    if now.timeIntervalSince(lastFlush) >= 0.1 {
-                        self.draft = accumulated
-                        lastFlush = now
+                for try await event in client.streamChat(messages: messages, config: config) {
+                    progress.handle(event)
+                    if case .content(let delta) = event {
+                        accumulated += delta
+                        let now = Date()
+                        if now.timeIntervalSince(lastFlush) >= 0.1 {
+                            self.draft = accumulated
+                            lastFlush = now
+                        }
                     }
                 }
                 self.draft = accumulated
@@ -96,6 +110,7 @@ final class WritingSessionViewModel: ObservableObject {
                 self.errorMessage = error.localizedDescription
                 self.phase = accumulated.isEmpty ? .idle : .done
             }
+            progress.finish()
             KeepAwake.set(false)
         }
     }
@@ -129,6 +144,7 @@ final class WritingSessionViewModel: ObservableObject {
         errorMessage = nil
         truncatedSections = []
         phase = .idle
+        progress.finish()
         KeepAwake.set(false)
     }
 }

@@ -21,6 +21,10 @@ struct DraftCard: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+            // 流式状态行：等待首Token / 深度思考（正文输出阶段正常流式展示，隐藏本行）
+            if vm.phase == .streaming {
+                StreamingStatusView(tracker: vm.progress, showsOutputting: false)
+            }
 
             ScrollView {
                 Text(vm.draft.isEmpty && vm.phase == .streaming ? "生成中…" : vm.draft)

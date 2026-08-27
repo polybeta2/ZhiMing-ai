@@ -33,8 +33,14 @@ enum LLMError: LocalizedError {
     }
 }
 
+/// 流式事件：思维链（reasoning_content）与正文分开通道
+enum StreamEvent {
+    case reasoning(String)
+    case content(String)
+}
+
 protocol LLMClient {
-    func streamChat(messages: [LLMMessage], config: GenerationConfig) -> AsyncThrowingStream<String, Error>
+    func streamChat(messages: [LLMMessage], config: GenerationConfig) -> AsyncThrowingStream<StreamEvent, Error>
     func testConnection() async throws -> String
 }
 

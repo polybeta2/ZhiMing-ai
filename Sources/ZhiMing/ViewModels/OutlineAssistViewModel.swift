@@ -17,6 +17,8 @@ final class OutlineAssistViewModel: ObservableObject {
     /// 卷纲完成时从 zm-dims 围栏解析出的四维补丁（采纳时按开关写入）
     @Published private(set) var extractedDims: VolumeDimsPatch?
     @Published var errorMessage: String?
+    /// 流式过程可视化（等待首Token/深度思考/输出统计）
+    let progress = StreamProgressTracker()
     private var streamTask: Task<Void, Never>?
     /// 最近一次请求参数，供「重新生成」复用
     private var lastRequest: (kind: OutlineTarget, instruction: String?)?
@@ -84,17 +86,21 @@ final class OutlineAssistViewModel: ObservableObject {
                                 config: GenerationConfig) {
         phase = .streaming
         KeepAwake.set(true)
+        progress.begin()
         streamTask = Task {
             // 流式节流：delta 先进缓冲，约 100ms 刷新一次发布属性，避免逐字重渲染卡顿
             var accumulated = ""
             var lastFlush = Date.distantPast
             do {
-                for try await delta in client.streamChat(messages: messages, config: config) {
-                    accumulated += delta
-                    let now = Date()
-                    if now.timeIntervalSince(lastFlush) >= 0.1 {
-                        self.draft = accumulated
-                        lastFlush = now
+                for try await event in client.streamChat(messages: messages, config: config) {
+                    progress.handle(event)
+                    if case .content(let delta) = event {
+                        accumulated += delta
+                        let now = Date()
+                        if now.timeIntervalSince(lastFlush) >= 0.1 {
+                            self.draft = accumulated
+                            lastFlush = now
+                        }
                     }
                 }
                 self.finalizeDraft(accumulated)
@@ -108,6 +114,7 @@ final class OutlineAssistViewModel: ObservableObject {
                 self.finalizeDraft(accumulated)
                 self.phase = accumulated.isEmpty ? .idle : .done
             }
+            progress.finish()
             KeepAwake.set(false)
         }
     }
@@ -126,6 +133,7 @@ final class OutlineAssistViewModel: ObservableObject {
         extractedSceneCards = nil
         extractedDims = nil
         phase = .idle
+        progress.finish()
         KeepAwake.set(false)
     }
 

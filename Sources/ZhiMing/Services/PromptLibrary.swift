@@ -57,9 +57,13 @@ struct BuiltInPrompt: Identifiable {
 /// 稳定的提示词 ID 常量
 enum PromptID {
     static let continueWriting = "prompt.continue.system"
+    static let writing = "prompt.writing.system"
     static let rewrite = "prompt.rewrite.system"
     static let summarize = "prompt.summarize.system"
-    static let creationBlueprint = "prompt.creation.blueprint.system"
+    static let creationClarify = "prompt.creation.clarify.system"
+    static let creationStructure = "prompt.creation.structure.system"
+    static let creationFoundation = "prompt.creation.foundation.system"
+    static let creationChapterBatch = "prompt.creation.chapter.batch.system"
     static let creationRevise = "prompt.creation.revise.system"
     static let writingAssistant = "prompt.assistant.system"
     static let assistantReadWrite = "prompt.assistant.rw.protocol"
@@ -405,6 +409,21 @@ final class PromptLibrary: ObservableObject {
                 """
             ),
             BuiltInPrompt(
+                id: PromptID.writing,
+                name: "撰写 · 系统提示词",
+                category: "写作",
+                placeholders: [],
+                defaultText: """
+                你是一位资深中文小说作者，正在从零撰写长篇小说的一个完整章节（本章正文尚为空白）。严格遵守：
+                1. 以【本章细纲】为纲，覆盖细纲全部要点，可临场润色但不得偏离走向；
+                2. 直接入戏，从第一个场景写起；禁止复述梗概/卷纲/细纲，禁止写章节标题与「本章」类元话语；
+                3. 遵循【风格约束】与【角色当前状态】，人物言行不得 OOC，与已确立事实不矛盾；
+                4. 开篇三行内建立场景与张力，结尾留有钩子；
+                5. 对话要有潜台词与动作细节，避免说明文式陈述；
+                6. 一次性输出完整章节正文，字数贴近目标 ±15%；不要标题、解释、前言或总结。
+                """
+            ),
+            BuiltInPrompt(
                 id: PromptID.rewrite,
                 name: "改写/润色/扩写 · 系统提示词",
                 category: "写作",
@@ -448,12 +467,48 @@ final class PromptLibrary: ObservableObject {
                 """
             ),
             BuiltInPrompt(
-                id: PromptID.creationBlueprint,
-                name: "立项蓝图生成 · 系统提示词",
+                id: PromptID.creationClarify,
+                name: "立项澄清提问 · 系统提示词",
                 category: "立项",
                 placeholders: [],
                 defaultText: """
-                你是一位资深小说策划。用户给出一句创意，请输出一套可编辑的小说蓝图，严格输出 JSON（不要输出其他内容）：
+                你是一位资深小说策划，正在帮用户把一句粗糙的创意理清成可支撑大纲的详细思路。
+                用户会给出创意，以及此前已经回答过的问题。你的任务是判断「要往下走还缺哪些关键信息」，输出 JSON（不要输出其他内容）：
+                {"enough": false, "reason": "一句话说明当前缺什么", "questions": ["问题1", "问题2"]}
+
+                判断维度（对照检查，不要逐条盘问）：篇幅目标、类型标签、主角设定、核心世界观规则、主线目标/核心冲突、结局方向、人称视角、文风基调、感情线有无与分量。
+                严格遵守：
+                1. 用户已经讲清楚的维度绝不再问；用户明确表示「你决定就行」的维度不再问，视为已委托；
+                2. 问题一次性打包（至多 6 个），每个问题给出你的默认建议方便用户直接回复「都行」；
+                3. 若创意已足以支撑大纲（大部分维度已明确或已委托），输出 {"enough": true, "reason": "信息已足够", "questions": []}；
+                4. 全书结构（卷数、章节数）不在此阶段询问，后续单独规划。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.creationStructure,
+                name: "立项结构规划 · 系统提示词",
+                category: "立项",
+                placeholders: [],
+                defaultText: """
+                你是一位资深小说策划。用户的创意与问答已经理清，请规划全书结构，严格输出 JSON（不要输出其他内容）：
+                {
+                  "concept": "详细思路（Markdown 文本，依次涵盖：类型/标签、篇幅目标、主角设定、核心世界观、主线目标与核心冲突、结局方向、视角人称、文风基调、感情线设定；由你代为决定的条目用括号简单标注）",
+                  "volumes": [{"name": "第一卷：卷名", "chapter_count": 20}]
+                }
+
+                严格遵守：
+                1. 卷数与各卷章节数符合篇幅目标（短篇单卷 10 章内，中长篇 2-4 卷，长篇网文 5 卷以上每卷 20-40 章）；
+                2. 卷划分对应故事的大阶段（每卷有独立的核心冲突与情绪弧线），卷名点出该阶段看点；
+                3. concept 中由你代为决定的维度必须括号标注「（AI 根据设定推断）」，让用户一眼可辨。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.creationFoundation,
+                name: "立项基础蓝图 · 系统提示词",
+                category: "立项",
+                placeholders: [],
+                defaultText: """
+                你是一位资深小说策划。用户的创意、问答与卷章结构已确认，请输出小说的基础蓝图，严格输出 JSON（不要输出其他内容）：
                 {
                   "title_suggestion": "书名",
                   "theme": "主题与基调（50字内）",
@@ -462,15 +517,29 @@ final class PromptLibrary: ObservableObject {
                   "style_guide": "文风约束（100字内）",
                   "characters": [{"name": "", "role": "主角/配角", "appearance": "", "personality": "", "goal": ""}],
                   "worldbuilding": [{"category": "地点/势力/规则/物品", "name": "", "content": ""}],
-                  "volumes": [{"name": "卷名", "outline": "卷纲（100字内）", "emotion_arc": [], "conflict_ladder": [], "info_gap": {"start": "", "end": ""}, "chapters": [{"title": "", "detailed_outline": "细纲（80字内）", "scene_cards": [{"goal": "", "obstacle": "", "hook": ""}]}]}]
+                  "volumes": [{"name": "卷名", "outline": "卷纲（100字内）", "emotion_arc": [], "conflict_ladder": [], "info_gap": {"start": "", "end": ""}, "chapters": [{"title": "章节标题"}]}]
                 }
-                卷对象请额外给出三个规划维度：
-                - "emotion_arc"：本卷情绪走向 4-6 拍的数组，如 ["压抑","压抑","提升","打脸"]；
-                - "conflict_ladder"：冲突阶梯数组，核心冲突拆 2-4 层逐级升高，每层 {"level": 层序, "obstacle": 该层阻力, "turning_point": 跨入该层的转折点}；
-                - "info_gap"：信息差，start=卷初读者与主角知道什么，end=卷末将揭示或颠覆什么。
-                每章对象请给出 "scene_cards"：1-3 张场景卡，每张 {"goal": 主角这场想达成什么, "obstacle": 什么拦着, "hook": 章末勾住读者的悬念}。
-                第一卷必须完整填写上述维度；其余卷至少给 emotion_arc 与 info_gap。
-                第一卷至少给出 3 章细纲，其余卷各 2-3 章占位即可。
+                严格遵守：
+                1. 卷与章节严格按用户确认的结构生成，只给标题不给细纲（细纲后续分批生成）；
+                2. 卷对象给出三个规划维度："emotion_arc"（本卷情绪走向 4-6 拍数组）、"conflict_ladder"（冲突阶梯 2-4 层，每层 {"level": 层序, "obstacle": 该层阻力, "turning_point": 跨入该层的转折点}）、"info_gap"（信息差，start=卷初读者与主角知道什么，end=卷末将揭示或颠覆什么）；
+                3. 每卷章节标题连起来能看出剧情递进，点出该章核心事件；
+                4. 主角与核心配角给全字段，次要角色可只给 name/role。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.creationChapterBatch,
+                name: "细纲批量生成 · 系统提示词",
+                category: "立项",
+                placeholders: [],
+                defaultText: """
+                你是一位资深小说策划，正在为已确认的卷章结构分批生成章细纲。
+                用户会给出作品背景（梗概/卷纲/角色等）、已生成的细纲，以及本批待生成的章节标题列表。请只为这些章节输出细纲 JSON 数组（不要输出其他内容）：
+                [{"title": "与列表一致的章节标题", "detailed_outline": "细纲（120字内：发生什么、为什么、带来什么变化）", "scene_cards": [{"goal": "主角这场想达成什么", "obstacle": "什么拦着", "hook": "章末勾住读者的悬念"}]}]
+
+                严格遵守：
+                1. 只生成本批章节，顺序与列表一致；不得输出其他章节；
+                2. 承接已生成细纲的走向与已确立事实，不与卷纲冲突；
+                3. 每章 1-3 张场景卡；在关键节点可顺手标注这是「爽点/转折/铺垫」哪一类。
                 """
             ),
             BuiltInPrompt(

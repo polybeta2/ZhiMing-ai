@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-// MARK: - 蓝图结构（字段与 creationBlueprint 模板一一对应）
+// MARK: - 蓝图结构（字段与 creationFoundation 模板一一对应）
 
 struct BlueprintCharacter: Codable, Identifiable {
     var id = UUID()
@@ -74,88 +74,229 @@ struct NovelBlueprint: Codable {
     var volumes: [BlueprintVolume] = []
 }
 
+// MARK: - 分阶段结构
+
+/// 澄清提问结果
+struct ClarifyResult: Codable {
+    var enough: Bool?
+    var reason: String?
+    var questions: [String]?
+}
+
+/// 卷章结构提案
+struct StructureProposal: Codable {
+    var concept: String?
+    var volumes: [ProposedVolume] = []
+
+    struct ProposedVolume: Codable {
+        var name: String?
+        var chapter_count: Int?
+    }
+}
+
 // MARK: - 立项会话状态机
 
-/// collecting → blueprint(streaming) → revising → confirmed
+/// 分阶段立项：collecting（澄清循环）→ proposing（结构提案）→
+/// blueprintReady（基础蓝图）→ outlining（细纲分批，可自动连续）→ confirmed
 /// iOS 15 兼容：ObservableObject + @Published
 @MainActor
 final class CreationSessionViewModel: ObservableObject {
-    enum Phase: Equatable { case collecting, streaming, revising, confirmed }
+    enum Phase: Equatable { case collecting, proposing, blueprintReady, outlining, confirmed }
+    enum StreamKind { case clarify, structure, foundation, revise, chapterBatch }
 
     @Published private(set) var phase: Phase = .collecting
+    @Published private(set) var isStreaming = false
     @Published var blueprint: NovelBlueprint?
+    @Published private(set) var proposal: StructureProposal?
+    /// 原始流式输出（JSON）：流结束后即清空，界面只做统计展示
     @Published private(set) var draft = ""
     @Published var errorMessage: String?
-    /// 流结束后回调：(原始输出, 是否解析成功)。取消/失败时也会触发。
-    var onStreamSettled: ((_ raw: String, _ parsed: Bool) -> Void)?
+    /// 细纲进度：已生成 / 总章数
+    @Published private(set) var outlineDone = 0
+    @Published private(set) var outlineTotal = 0
+    /// 每轮生成的章数（1~3）与自动连续开关
+    @Published var chaptersPerBatch = 2
+    @Published var autoContinue = false
+    /// 流式过程可视化（等待首Token/深度思考/输出统计）
+    let progress = StreamProgressTracker()
+
+    /// 流结束回调：kind + 预备好的助手消息（追加气泡用，nil 不追加）+ raw（解析失败时界面展示）
+    var onStreamSettled: ((_ kind: StreamKind, _ message: String?, _ raw: String, _ parsed: Bool) -> Void)?
     private var streamTask: Task<Void, Never>?
 
-    // MARK: 生成蓝图
+    private var provider: ProviderConfig?
+    private var supplement: String?
+    private var brief = ""          // 初始创意
+    private var qaText = ""         // 澄清问答累积文本
 
-    func generateBlueprint(brief: String, provider: ProviderConfig, supplement: String? = nil) {
-        guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
-              let baseUrl = URL(string: provider.baseUrl) else {
-            errorMessage = "未配置有效的模型接口或 API Key"
-            return
+    // MARK: 阶段 1：澄清提问（collecting）
+
+    /// 用户在 collecting 发送消息：首条为创意，其余为对问题的回答
+    func sendCollecting(text: String, provider: ProviderConfig, supplement: String?) {
+        if brief.isEmpty {
+            brief = text
+        } else {
+            qaText += "【回答】\(text)\n"
         }
-
-        let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
-        let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
-        let messages = PromptTemplates.applying(
-            providerExtra: provider.systemPromptExtra,
-            to: PromptTemplates.creationBlueprint(brief: brief, supplement: supplement)
-        )
-        authorizeThenStream(messages: messages, client: client, config: config)
+        self.provider = provider
+        self.supplement = supplement
+        requestClarify()
     }
 
-    // MARK: 对话修订
+    private func requestClarify() {
+        guard let provider else { return }
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.creationClarify(brief: brief, qaHistory: qaText, supplement: supplement)
+        )
+        beginStream(kind: .clarify, messages: messages, provider: provider)
+    }
+
+    // MARK: 阶段 2：结构提案（proposing）
+
+    /// 确认结构 → 生成基础蓝图
+    func confirmProposal() {
+        requestFoundation(feedback: nil)
+    }
+
+    /// 结构提案阶段的修改意见 → 重新规划
+    func sendProposalFeedback(_ feedback: String) {
+        guard provider != nil else { return }
+        requestStructure(feedback: feedback)
+    }
+
+    private func requestStructure(feedback: String?) {
+        guard let provider else { return }
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.creationStructure(
+                brief: brief, qaHistory: qaText, feedback: feedback, supplement: supplement)
+        )
+        beginStream(kind: .structure, messages: messages, provider: provider)
+    }
+
+    // MARK: 阶段 3：基础蓝图（blueprintReady）
+
+    private func requestFoundation(feedback: String?) {
+        guard let provider else { return }
+        let structureJSON = proposalJSON() ?? "{}"
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.creationFoundation(
+                brief: brief, qaHistory: qaText, structureJSON: structureJSON,
+                feedback: feedback, supplement: supplement)
+        )
+        beginStream(kind: .foundation, messages: messages, provider: provider)
+    }
+
+    // MARK: 对话修订（blueprintReady / outlining）
 
     func revise(feedback: String, provider: ProviderConfig, supplement: String? = nil) {
         guard let json = blueprintJSON() else {
             errorMessage = "当前没有可修订的蓝图"
-            phase = .collecting
             return
         }
-        guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
-              let baseUrl = URL(string: provider.baseUrl) else {
-            errorMessage = "未配置有效的模型接口或 API Key"
-            return
-        }
-
-        let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
-        let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
+        self.provider = provider
+        self.supplement = supplement
+        // 修订期间暂停自动连续
+        autoContinue = false
         let messages = PromptTemplates.applying(
             providerExtra: provider.systemPromptExtra,
             to: PromptTemplates.creationRevise(blueprintJSON: json, feedback: feedback, supplement: supplement)
         )
-        authorizeThenStream(messages: messages, client: client, config: config)
+        beginStream(kind: .revise, messages: messages, provider: provider)
     }
 
-    func stop() { streamTask?.cancel() }
+    // MARK: 阶段 4：细纲分批（outlining）
 
-    /// 体量护栏（v1.7）：超过告警线的请求先弹确认，确认通过才进入流式状态；
-    /// 取消则保持原 phase（collecting/revising），不产生任何写入。
-    private func authorizeThenStream(messages: [LLMMessage],
-                                     client: OpenAICompatibleClient,
-                                     config: GenerationConfig) {
-        let totalChars = messages.totalContentChars
-        Task { @MainActor in
-            guard await PromptGuard.authorized(totalChars: totalChars) else { return }
-            self.phase = .streaming
-            self.draft = ""
-            self.errorMessage = nil
-            KeepAwake.set(true)
-            self.stream(messages: messages, client: client, config: config)
+    /// 开始细纲阶段（blueprintReady → outlining）
+    func startOutlining() {
+        guard blueprint != nil else { return }
+        refreshOutlineProgress()
+        phase = .outlining
+    }
+
+    /// 生成下一批细纲（按 chaptersPerBatch 取最早未生成的章节）
+    func generateNextBatch() {
+        guard let provider, blueprint != nil, !isStreaming else { return }
+        let targets = pendingChapters(prefix: chaptersPerBatch)
+        guard !targets.isEmpty else { return }
+        if phase != .outlining { startOutlining() }
+        let context = batchContext(targets: targets)
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.creationChapterBatch(context: context, targets: targets, supplement: supplement)
+        )
+        beginStream(kind: .chapterBatch, messages: messages, provider: provider)
+    }
+
+    func stop() {
+        autoContinue = false
+        streamTask?.cancel()
+    }
+
+    /// 已生成/总章数
+    private func refreshOutlineProgress() {
+        guard let blueprint else { return }
+        let all = blueprint.volumes.flatMap(\.chapters)
+        outlineTotal = all.count
+        outlineDone = all.filter { !($0.detailed_outline ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+    }
+
+    /// 最早 N 个没有细纲的章节标题（卷序/章序）
+    private func pendingChapters(prefix: Int) -> [String] {
+        guard let blueprint else { return [] }
+        var titles: [String] = []
+        for volume in blueprint.volumes {
+            for chapter in volume.chapters {
+                let outline = (chapter.detailed_outline ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if outline.isEmpty {
+                    let title = chapter.title?.trimmingCharacters(in: .whitespaces) ?? ""
+                    if !title.isEmpty { titles.append(title) }
+                    if titles.count >= prefix { return titles }
+                }
+            }
         }
+        return titles
     }
 
-    /// 供对话修订时携带当前蓝图
-    func blueprintJSON() -> String? {
-        guard let blueprint else { return nil }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(blueprint) else { return nil }
-        return String(data: data, encoding: .utf8)
+    /// 细纲批次的上下文：梗概/风格/角色 + 目标章节所在卷的卷纲 + 最近已生成细纲
+    private func batchContext(targets: [String]) -> String {
+        guard let blueprint else { return "" }
+        var lines: [String] = []
+        if let title = blueprint.title_suggestion, !title.isEmpty { lines.append("【书名】\(title)") }
+        if let synopsis = blueprint.synopsis, !synopsis.isEmpty { lines.append("【梗概】\(synopsis)") }
+        if let style = blueprint.style_guide, !style.isEmpty { lines.append("【文风约束】\(style)") }
+        let characters = blueprint.characters
+            .compactMap { card -> String? in
+                guard let name = card.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return nil }
+                return "\(name)（\(card.role ?? "角色")）"
+            }
+        if !characters.isEmpty { lines.append("【角色】\(characters.joined(separator: "、"))") }
+
+        // 目标章节所在卷（按标题定位第一个命中的卷）+ 各卷卷纲摘要
+        for (index, volume) in blueprint.volumes.enumerated() {
+            guard let outline = volume.outline, !outline.isEmpty else { continue }
+            let hit = volume.chapters.contains {
+                targets.contains($0.title?.trimmingCharacters(in: .whitespaces) ?? "")
+            }
+            if hit {
+                lines.append("【\(volume.name ?? "第\(index + 1)卷")·卷纲】\(outline)")
+            } else {
+                lines.append("【\(volume.name ?? "第\(index + 1)卷")】\(String(outline.prefix(80)))")
+            }
+        }
+
+        // 最近 5 章已生成细纲（承接走向）
+        let generated = blueprint.volumes.flatMap(\.chapters).compactMap { chapter -> String? in
+            guard let outline = chapter.detailed_outline,
+                  !outline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return "\(chapter.title ?? "")：\(outline)"
+        }
+        if !generated.isEmpty {
+            lines.append("【最近已生成细纲】\n" + generated.suffix(5).joined(separator: "\n"))
+        }
+        return lines.joined(separator: "\n\n")
     }
 
     // MARK: 确认创建
@@ -242,7 +383,8 @@ final class CreationSessionViewModel: ObservableObject {
                     title: chapterItem.title?.isEmpty == false ? chapterItem.title! : "第\(chapterIndex + 1)章",
                     sortOrder: chapterIndex + 1
                 )
-                chapter.detailedOutline = chapterItem.detailed_outline
+                let outline = chapterItem.detailed_outline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                chapter.detailedOutline = outline.isEmpty ? nil : outline
 
                 // 场景卡：三要素全空的丢弃
                 let cards = (chapterItem.scene_cards ?? []).map { card in
@@ -256,65 +398,182 @@ final class CreationSessionViewModel: ObservableObject {
             novel.volumes.append(volume)
         }
 
+        autoContinue = false
         phase = .confirmed
         store.save()
     }
 
     // MARK: 内部
 
-    private func stream(
-        messages: [LLMMessage],
-        client: OpenAICompatibleClient,
-        config: GenerationConfig
-    ) {
+    /// 供对话修订时携带当前蓝图
+    func blueprintJSON() -> String? {
+        guard let blueprint else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(blueprint) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func proposalJSON() -> String? {
+        guard let proposal else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(proposal) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// 体量护栏（v1.7）：超过告警线的请求先弹确认，确认通过才进入流式状态
+    private func beginStream(kind: StreamKind, messages: [LLMMessage], provider: ProviderConfig) {
+        guard !isStreaming else { return }
+        let totalChars = messages.totalContentChars
+        Task { @MainActor in
+            guard await PromptGuard.authorized(totalChars: totalChars) else { return }
+            self.isStreaming = true
+            self.draft = ""
+            self.errorMessage = nil
+            KeepAwake.set(true)
+            self.stream(kind: kind, messages: messages, provider: provider)
+        }
+    }
+
+    private func stream(kind: StreamKind, messages: [LLMMessage], provider: ProviderConfig) {
+        guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
+              let baseUrl = URL(string: provider.baseUrl) else {
+            errorMessage = "未配置有效的模型接口或 API Key"
+            isStreaming = false
+            return
+        }
+        let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
+        let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
+
         streamTask?.cancel()
         streamTask = Task {
-            // 流式节流：delta 先进缓冲，约 100ms 刷新一次发布属性，避免逐字重渲染卡顿
             var raw = ""
-            var lastFlush = Date.distantPast
+            progress.begin()
             do {
-                for try await delta in client.streamChat(messages: messages, config: config) {
-                    raw += delta
-                    let now = Date()
-                    if now.timeIntervalSince(lastFlush) >= 0.1 {
-                        self.draft = raw
-                        lastFlush = now
-                    }
+                for try await event in client.streamChat(messages: messages, config: config) {
+                    progress.handle(event)
+                    if case .content(let delta) = event { raw += delta }
                 }
                 if !Task.isCancelled {
-                    self.draft = raw
-                    let parsed = self.finalize(raw)
-                    self.onStreamSettled?(raw, parsed)
+                    let message = self.settle(kind: kind, raw: raw)
+                    self.onStreamSettled?(kind, message, raw, message != nil || kindNeedsRaw(kind))
                 }
             } catch is CancellationError {
-                // 停止：把已生成的部分交给界面保留
-                self.draft = raw
+                // 停止：保留已生成部分给界面展示
                 self.errorMessage = raw.isEmpty ? nil : "生成被停止，已保留部分结果"
-                self.phase = self.blueprint == nil ? .collecting : .revising
-                self.onStreamSettled?(raw, false)
+                self.draft = ""
+                self.onStreamSettled?(kind, nil, raw, false)
             } catch {
                 if !Task.isCancelled {
                     self.errorMessage = error.localizedDescription
-                    self.phase = self.blueprint == nil ? .collecting : .revising
-                    self.onStreamSettled?("", false)
+                    self.onStreamSettled?(kind, nil, "", false)
                 }
             }
             self.draft = ""
+            self.progress.finish()
+            self.isStreaming = false
             KeepAwake.set(false)
         }
     }
 
-    private func finalize(_ raw: String) -> Bool {
-        if let parsed = LLMJSONParser.decode(NovelBlueprint.self, fromJSONObjectIn: raw) {
+    /// 解析失败时界面是否需要展示原始输出
+    private func kindNeedsRaw(_ kind: StreamKind) -> Bool {
+        kind != .chapterBatch && kind != .clarify
+    }
+
+    /// 流正常结束：解析并驱动阶段转换，返回给界面的助手消息（nil 不追加）
+    @discardableResult
+    private func settle(kind: StreamKind, raw: String) -> String? {
+        switch kind {
+        case .clarify:
+            guard let result = LLMJSONParser.decode(ClarifyResult.self, fromJSONObjectIn: raw) else {
+                errorMessage = "澄清结果解析失败，请重试"
+                return nil
+            }
+            let questions = (result.questions ?? []).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            if result.enough == true || questions.isEmpty {
+                // 信息足够：自动接结构规划
+                Task { @MainActor in
+                    self.requestStructure(feedback: nil)
+                }
+                return "思路已经理清，正在规划卷章结构…"
+            }
+            qaText += "【问题】\n" + questions.enumerated()
+                .map { "\($0.offset + 1). \($0.element)" }
+                .joined(separator: "\n") + "\n"
+            return "有几个地方想先确认一下：\n\n" + questions.enumerated()
+                .map { "\($0.offset + 1). \($0.element)" }
+                .joined(separator: "\n")
+        case .structure:
+            guard let parsed = LLMJSONParser.decode(StructureProposal.self, fromJSONObjectIn: raw) else {
+                errorMessage = "结构提案解析失败，可发送「重新规划」或修改意见重试"
+                return nil
+            }
+            proposal = parsed
+            phase = .proposing
+            return "已按思路规划出卷章结构，请审阅下方卡片：确认结构开始生成蓝图，或直接告诉我要调整的地方。"
+        case .foundation:
+            guard let parsed = LLMJSONParser.decode(NovelBlueprint.self, fromJSONObjectIn: raw) else {
+                errorMessage = "蓝图 JSON 解析失败，可发送「重新生成」"
+                phase = .proposing
+                return nil
+            }
             blueprint = parsed
-            errorMessage = nil
-            phase = .revising
-            return true
-        } else {
-            // 解析失败：原始回复已在聊天中展示，提示重试（不做静默降级）
-            errorMessage = "蓝图 JSON 解析失败，可发送「重新生成」"
-            phase = .collecting
-            return false
+            refreshOutlineProgress()
+            phase = .blueprintReady
+            return "基础蓝图已生成（含角色、世界观与各卷卷纲），可在卡片中审阅编辑。接下来可以：提出修改意见，或开始分批生成细纲。"
+        case .revise:
+            guard let parsed = LLMJSONParser.decode(NovelBlueprint.self, fromJSONObjectIn: raw) else {
+                errorMessage = "蓝图 JSON 解析失败，可发送「重新生成」"
+                return nil
+            }
+            blueprint = parsed
+            refreshOutlineProgress()
+            return "已按你的意见修订蓝图，继续查看卡片或提出更多意见。"
+        case .chapterBatch:
+            guard let batch = LLMJSONParser.decode([BlueprintChapter].self, fromJSONObjectIn: raw) else {
+                errorMessage = "细纲批次解析失败，可重新生成本批"
+                return nil
+            }
+            applyBatch(batch)
+            refreshOutlineProgress()
+            let done = outlineDone, total = outlineTotal
+            let message = done >= total
+                ? "细纲已全部生成（\(done)/\(total)）。点「创建作品」落库，开始写作吧！"
+                : "已生成本批细纲（进度 \(done)/\(total)）。"
+            // 自动连续：还有剩余且开关开启 → 延迟接下一批
+            if autoContinue, done < total {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard self.autoContinue, !self.isStreaming, self.outlineDone < self.outlineTotal else { return }
+                    self.generateNextBatch()
+                }
+            }
+            return message
         }
+    }
+
+    /// 把批次细纲按标题匹配写回蓝图对应章节
+    private func applyBatch(_ batch: [BlueprintChapter]) {
+        guard var bp = blueprint else { return }
+        for item in batch {
+            let title = item.title?.trimmingCharacters(in: .whitespaces) ?? ""
+            let outline = item.detailed_outline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !title.isEmpty, !outline.isEmpty else { continue }
+            outer: for vIndex in bp.volumes.indices {
+                for cIndex in bp.volumes[vIndex].chapters.indices {
+                    let chapter = bp.volumes[vIndex].chapters[cIndex]
+                    if chapter.title?.trimmingCharacters(in: .whitespaces) == title {
+                        bp.volumes[vIndex].chapters[cIndex].detailed_outline = item.detailed_outline
+                        if let cards = item.scene_cards, !cards.isEmpty {
+                            bp.volumes[vIndex].chapters[cIndex].scene_cards = cards
+                        }
+                        break outer
+                    }
+                }
+            }
+        }
+        blueprint = bp
     }
 }
