@@ -133,6 +133,8 @@ struct ChatView: View {
             if isCreation {
                 // 恢复上次进度（SQLite）：阶段/问答/提案/蓝图原样回来，AI上下文不丢失
                 creation.attachAndRestore(threadID: thread.id)
+                // provider 不入缓存：恢复后重新注入，否则确认结构/发送消息的 guard 会短路
+                creation.setProvider(activeProvider)
                 if creation.phase == .collecting, thread.messages.isEmpty,
                    input.isEmpty, !novel.synopsis.isEmpty {
                     input = novel.synopsis
@@ -325,6 +327,8 @@ struct ChatView: View {
 
     private func routeCreation(text: String) {
         guard let provider = activeProvider else { return }
+        // 会话恢复/切换模型后统一重注入，保证提案反馈、修订等非直传 provider 的分支可用
+        creation.setProvider(provider)
 
         switch creation.phase {
         case .collecting:

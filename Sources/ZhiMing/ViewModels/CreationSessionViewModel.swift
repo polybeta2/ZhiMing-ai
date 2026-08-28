@@ -167,6 +167,12 @@ final class CreationSessionViewModel: ObservableObject {
     /// SQLite 缓存键（对应 ChatThread.id）；nil = 未接缓存（不落盘）
     private var cacheKey: UUID?
 
+    /// 注入当前提供商：发消息/恢复会话后设置；provider 不入缓存（含 Keychain 引用），
+    /// 退出重进后必须重新注入，否则 confirmProposal/sendProposalFeedback 的 guard 会短路
+    func setProvider(_ provider: ProviderConfig?) {
+        self.provider = provider
+    }
+
     // MARK: 会话缓存（SQLite）
 
     /// 绑定缓存键并尝试恢复上次进度（nil/无记录/损坏时静默保持空会话）
