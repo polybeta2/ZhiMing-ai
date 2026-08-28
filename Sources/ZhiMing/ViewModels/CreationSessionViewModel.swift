@@ -23,21 +23,80 @@ struct BlueprintWorld: Codable, Identifiable {
     enum CodingKeys: String, CodingKey { case category, name, content }
 }
 
+/// 对象数组的元素普遍做「字符串容错」：部分模型（如 gemini-flash 经部分网关）会把
+/// 本该是对象数（如 conflict_ladder）的输出成字符串数组，Swift 严格 Codable 因此
+/// 整单失败（v2.1.2 修 volumes[0].conflict_ladder[0] typeMismatch）。字符串被当作首字段。
 struct BlueprintSceneCard: Codable {
     var goal: String?
     var obstacle: String?
     var hook: String?
+
+    enum CodingKeys: String, CodingKey { case goal, obstacle, hook }
+
+    init(from decoder: Decoder) throws {
+        if let text = try? decoder.singleValueContainer().decode(String.self) {
+            goal = text; obstacle = nil; hook = nil
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        goal = try c.decodeIfPresent(String.self, forKey: .goal)
+        obstacle = try c.decodeIfPresent(String.self, forKey: .obstacle)
+        hook = try c.decodeIfPresent(String.self, forKey: .hook)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(goal, forKey: .goal)
+        try c.encodeIfPresent(obstacle, forKey: .obstacle)
+        try c.encodeIfPresent(hook, forKey: .hook)
+    }
 }
 
 struct BlueprintConflictRung: Codable {
     var level: Int?
     var obstacle: String?
     var turning_point: String?
+
+    enum CodingKeys: String, CodingKey { case level, obstacle, turning_point }
+
+    init(from decoder: Decoder) throws {
+        // 已验证的失稳点：模型把 conflict_ladder 输出成字符串数组时逐项容错为 obstacle
+        if let text = try? decoder.singleValueContainer().decode(String.self) {
+            level = nil; obstacle = text; turning_point = nil
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        level = try c.decodeIfPresent(Int.self, forKey: .level)
+        obstacle = try c.decodeIfPresent(String.self, forKey: .obstacle)
+        turning_point = try c.decodeIfPresent(String.self, forKey: .turning_point)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(level, forKey: .level)
+        try c.encodeIfPresent(obstacle, forKey: .obstacle)
+        try c.encodeIfPresent(turning_point, forKey: .turning_point)
+    }
 }
 
 struct BlueprintInfoGap: Codable {
     var start: String?
     var end: String?
+
+    enum CodingKeys: String, CodingKey { case start, end }
+
+    init(from decoder: Decoder) throws {
+        if let text = try? decoder.singleValueContainer().decode(String.self) {
+            start = text; end = nil
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        start = try c.decodeIfPresent(String.self, forKey: .start)
+        end = try c.decodeIfPresent(String.self, forKey: .end)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(start, forKey: .start)
+        try c.encodeIfPresent(end, forKey: .end)
+    }
 }
 
 /// 细纲阶段登记的伏笔：埋设章的细纲生成时由 AI 登记，reveal_in 指向计划揭晓章
@@ -45,6 +104,25 @@ struct BlueprintForeshadow: Codable {
     var title: String?
     var detail: String?
     var reveal_in: String?
+
+    enum CodingKeys: String, CodingKey { case title, detail, reveal_in }
+
+    init(from decoder: Decoder) throws {
+        if let text = try? decoder.singleValueContainer().decode(String.self) {
+            title = text; detail = nil; reveal_in = nil
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        reveal_in = try c.decodeIfPresent(String.self, forKey: .reveal_in)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(title, forKey: .title)
+        try c.encodeIfPresent(detail, forKey: .detail)
+        try c.encodeIfPresent(reveal_in, forKey: .reveal_in)
+    }
 }
 
 struct BlueprintChapter: Codable, Identifiable {

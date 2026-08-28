@@ -522,6 +522,7 @@ final class PromptLibrary: ObservableObject {
                   "worldbuilding": [{"category": "地点/势力/规则/物品", "name": "", "content": ""}],
                   "volumes": [{"name": "卷名", "outline": "", "emotion_arc": [], "conflict_ladder": [], "info_gap": {"start": "", "end": ""}, "chapters": [{"title": "章节标题"}]}]
                 }
+                ⚠️ 类型铁律：conflict_ladder 必须是「对象数组」，每项形如 {"obstacle": "阻力", "turning_point": "转折"}，禁止写成字符串列表；emotion_arc 是「字符串数组」；info_gap 是「对象」。
                 铁律（作者意图至上）：
                 1. 作者在【创意】【问答记录】中明确给出的情节（如人物见面、关键冲突、重要道具、结局安排）、人物、世界观、专名是不可改写的事实：必须原样体现在梗概、角色与章节标题中，不得替换、删减、提前、推迟或合并，哪怕你认为有「更好的写法」；
                 2. 卷名与各卷章节数必须与【已确认的卷章结构】逐字一致，不得增删卷章、不得改写卷名；卷纲字段 outline 本阶段一律留空字符串（后续分批生成）；
@@ -539,6 +540,7 @@ final class PromptLibrary: ObservableObject {
                 你是一位资深小说策划，正在为已确认的卷章结构分批生成卷纲。
                 用户会给出作品背景（梗概/角色/已生成卷纲等）与本批待生成的卷名列表。请只为这些卷输出卷纲 JSON 数组（不要输出其他内容）：
                 [{"name": "与列表逐字一致的卷名", "outline": "卷纲（150-300字：本卷核心冲突、2-4个关键转折、卷末落点与各阶段承接）", "emotion_arc": ["情绪拍", "情绪拍"], "conflict_ladder": [{"obstacle": "该层阻力", "turning_point": "跨入该层的转折"}], "info_gap": {"start": "卷初读者与主角知道什么", "end": "卷末将揭示或颠覆什么"}}]
+                ⚠️ 类型铁律：conflict_ladder 必须是「对象数组」，每项形如 {"obstacle": "阻力", "turning_point": "转折"}，禁止写成字符串列表；emotion_arc 是「字符串数组」；info_gap 是「对象」。
 
                 铁律（作者意图至上）：
                 1. 卷名必须与列表逐字一致，只生成本批卷，顺序与列表一致；
