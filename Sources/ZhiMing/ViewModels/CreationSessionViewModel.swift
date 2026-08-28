@@ -40,13 +40,21 @@ struct BlueprintInfoGap: Codable {
     var end: String?
 }
 
+/// 细纲阶段登记的伏笔：埋设章的细纲生成时由 AI 登记，reveal_in 指向计划揭晓章
+struct BlueprintForeshadow: Codable {
+    var title: String?
+    var detail: String?
+    var reveal_in: String?
+}
+
 struct BlueprintChapter: Codable, Identifiable {
     var id = UUID()
     var title: String?
     var detailed_outline: String?
     var scene_cards: [BlueprintSceneCard]?
+    var foreshadowings: [BlueprintForeshadow]?
 
-    enum CodingKeys: String, CodingKey { case title, detailed_outline, scene_cards }
+    enum CodingKeys: String, CodingKey { case title, detailed_outline, scene_cards, foreshadowings }
 }
 
 struct BlueprintVolume: Codable, Identifiable {
@@ -94,6 +102,29 @@ struct StructureProposal: Codable {
     }
 }
 
+/// 卷纲批次补丁：与 creationVolumeBatch 模板输出契约一一对应
+struct VolumeOutlinePatch: Codable {
+    var name: String?
+    var outline: String?
+    var emotion_arc: [String]?
+    var conflict_ladder: [BlueprintConflictRung]?
+    var info_gap: BlueprintInfoGap?
+}
+
+/// 立项会话快照：退出书籍页/重启后经 SQLite 缓存恢复，AI 上下文与表格不丢失。
+/// 只缓存「纯数据」：brief/qaText/proposal/blueprint；自动连续恢复为关闭，
+/// 不缓存 in-flight 流（重进后界面处于可继续生成的静止态）。
+struct CreationSessionState: Codable {
+    var phaseRaw: String
+    var brief: String
+    var qaText: String
+    var proposal: StructureProposal?
+    var blueprint: NovelBlueprint?
+    var volumesPerBatch: Int
+    var chaptersPerBatch: Int
+    var autoContinue: Bool
+}
+
 // MARK: - 立项会话状态机
 
 /// 分阶段立项：collecting（澄清循环）→ proposing（结构提案）→
@@ -101,8 +132,9 @@ struct StructureProposal: Codable {
 /// iOS 15 兼容：ObservableObject + @Published
 @MainActor
 final class CreationSessionViewModel: ObservableObject {
-    enum Phase: Equatable { case collecting, proposing, blueprintReady, outlining, confirmed }
-    enum StreamKind { case clarify, structure, foundation, revise, chapterBatch }
+    /// String 原始值用于 SQLite 快照恢复（phase 持久化）
+    enum Phase: String, Codable, Equatable { case collecting, proposing, blueprintReady, outlining, confirmed }
+    enum StreamKind { case clarify, structure, foundation, revise, volumeBatch, chapterBatch }
 
     @Published private(set) var phase: Phase = .collecting
     @Published private(set) var isStreaming = false
@@ -111,10 +143,14 @@ final class CreationSessionViewModel: ObservableObject {
     /// 原始流式输出（JSON）：流结束后即清空，界面只做统计展示
     @Published private(set) var draft = ""
     @Published var errorMessage: String?
+    /// 卷纲进度：已生成 / 总卷数
+    @Published private(set) var volumeDone = 0
+    @Published private(set) var volumeTotal = 0
     /// 细纲进度：已生成 / 总章数
     @Published private(set) var outlineDone = 0
     @Published private(set) var outlineTotal = 0
-    /// 每轮生成的章数（1~3）与自动连续开关
+    /// 每轮生成的卷数（1~5）与章数（1~3），共用自动连续开关
+    @Published var volumesPerBatch = 3
     @Published var chaptersPerBatch = 2
     @Published var autoContinue = false
     /// 流式过程可视化（等待首Token/深度思考/输出统计）
@@ -128,6 +164,56 @@ final class CreationSessionViewModel: ObservableObject {
     private var supplement: String?
     private var brief = ""          // 初始创意
     private var qaText = ""         // 澄清问答累积文本
+    /// SQLite 缓存键（对应 ChatThread.id）；nil = 未接缓存（不落盘）
+    private var cacheKey: UUID?
+
+    // MARK: 会话缓存（SQLite）
+
+    /// 绑定缓存键并尝试恢复上次进度（nil/无记录/损坏时静默保持空会话）
+    func attachAndRestore(threadID: UUID) {
+        cacheKey = threadID
+        guard let payload = CreationSessionCache.load(forThread: threadID),
+              let data = payload.data(using: .utf8),
+              let state = try? JSONDecoder().decode(CreationSessionState.self, from: data),
+              let restored = CreationSessionViewModel.Phase(rawValue: state.phaseRaw),
+              restored != .confirmed else { return }
+        phase = restored
+        brief = state.brief
+        qaText = state.qaText
+        proposal = state.proposal
+        blueprint = state.blueprint
+        volumesPerBatch = state.volumesPerBatch
+        chaptersPerBatch = state.chaptersPerBatch
+        autoContinue = false        // 恢复会话不自动续跑，由用户手动触发
+        refreshOutlineProgress()
+    }
+
+    /// 把当前流程状态写入 SQLite 缓存（静默；失败不影响主流程）
+    func persist() {
+        guard let cacheKey else { return }
+        let state = CreationSessionState(
+            phaseRaw: phase.rawValue,
+            brief: brief,
+            qaText: qaText,
+            proposal: proposal,
+            blueprint: blueprint,
+            volumesPerBatch: volumesPerBatch,
+            chaptersPerBatch: chaptersPerBatch,
+            autoContinue: autoContinue
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(state),
+              let payload = String(data: data, encoding: .utf8) else { return }
+        CreationSessionCache.save(payload: payload, forThread: cacheKey)
+    }
+
+    /// 会话终结（作品已创建）：清除缓存并脱离绑定
+    private func detachCache() {
+        guard let cacheKey else { return }
+        CreationSessionCache.remove(forThread: cacheKey)
+        self.cacheKey = nil
+    }
 
     // MARK: 阶段 1：澄清提问（collecting）
 
@@ -140,6 +226,7 @@ final class CreationSessionViewModel: ObservableObject {
         }
         self.provider = provider
         self.supplement = supplement
+        persist()       // 创意/回答先落盘，防中途退出丢上下文
         requestClarify()
     }
 
@@ -207,9 +294,102 @@ final class CreationSessionViewModel: ObservableObject {
         beginStream(kind: .revise, messages: messages, provider: provider)
     }
 
-    // MARK: 阶段 4：细纲分批（outlining）
+    // MARK: 阶段 4：卷纲分批（blueprintReady 内）
 
-    /// 开始细纲阶段（blueprintReady → outlining）
+    /// 卷纲是否还有缺口（foundation 生成的蓝图卷纲留空，由本批次补齐）
+    var volumePendingCount: Int { max(0, volumeTotal - volumeDone) }
+
+    /// 生成下一批卷纲（按 volumesPerBatch 取最早未生成的卷）
+    func generateNextVolumeBatch() {
+        guard let provider, blueprint != nil, !isStreaming else { return }
+        let targets = pendingVolumes(prefix: volumesPerBatch)
+        guard !targets.isEmpty else { return }
+        let context = volumeBatchContext(targets: targets)
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.creationVolumeBatch(context: context, targets: targets, supplement: supplement)
+        )
+        beginStream(kind: .volumeBatch, messages: messages, provider: provider)
+    }
+
+    /// 最早 N 个没有卷纲的卷名
+    private func pendingVolumes(prefix: Int) -> [String] {
+        guard let blueprint else { return [] }
+        var names: [String] = []
+        for (index, volume) in blueprint.volumes.enumerated() {
+            let outline = (volume.outline ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if outline.isEmpty {
+                names.append(volume.name?.isEmpty == false ? volume.name! : "第\(index + 1)卷")
+                if names.count >= prefix { return names }
+            }
+        }
+        return names
+    }
+
+    /// 卷纲批次上下文：创意/梗概/风格/角色 + 全书结构（卷名+各卷章节数）
+    /// + 已生成卷纲（承接走向） + concept（结构提案的详细思路）
+    private func volumeBatchContext(targets: [String]) -> String {
+        guard let blueprint else { return "" }
+        var lines: [String] = []
+        if let title = blueprint.title_suggestion, !title.isEmpty { lines.append("【书名】\(title)") }
+        if let synopsis = blueprint.synopsis, !synopsis.isEmpty { lines.append("【梗概】\(synopsis)") }
+        if let style = blueprint.style_guide, !style.isEmpty { lines.append("【文风约束】\(style)") }
+        if let concept = proposal?.concept, !concept.isEmpty {
+            lines.append("【已确认的故事思路】\n\(String(concept.prefix(PromptLimits.requiredFieldCap)))")
+        }
+        let characters = blueprint.characters
+            .compactMap { card -> String? in
+                guard let name = card.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return nil }
+                return "\(name)（\(card.role ?? "角色")）"
+            }
+        if !characters.isEmpty { lines.append("【角色】\(characters.joined(separator: "、"))") }
+
+        // 全书结构：卷名 + 各卷章节数 + 本卷章节标题（卷纲以此为剧情范围边界）
+        let structure = blueprint.volumes.enumerated().map { index, volume -> String in
+            let name = volume.name?.isEmpty == false ? volume.name! : "第\(index + 1)卷"
+            let isTarget = targets.contains(name)
+            let titles = volume.chapters.compactMap { $0.title }.joined(separator: "、")
+            var line = "◇ \(name)（\(volume.chapters.count) 章）\(isTarget ? "▶（本批）" : "")"
+            if isTarget, !titles.isEmpty { line += "：\(titles)" }
+            return line
+        }
+        lines.append("【全书结构】\n" + structure.joined(separator: "\n"))
+
+        // 已生成卷纲（供承接；只给全量给本批前一卷，其余给摘要行）
+        for volume in blueprint.volumes {
+            guard let outline = volume.outline,
+                  !outline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            lines.append("【\(volume.name ?? "卷")·已生成卷纲】\(outline)")
+        }
+        return lines.joined(separator: "\n\n")
+    }
+
+    /// 把批次卷纲按卷名匹配写回蓝图对应卷
+    private func applyVolumeBatch(_ batch: [VolumeOutlinePatch]) {
+        guard var bp = blueprint else { return }
+        for item in batch {
+            let name = item.name?.trimmingCharacters(in: .whitespaces) ?? ""
+            let outline = item.outline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !name.isEmpty, !outline.isEmpty else { continue }
+            guard let vIndex = bp.volumes.firstIndex(where: {
+                ($0.name ?? "").trimmingCharacters(in: .whitespaces) == name
+            }) else { continue }
+            bp.volumes[vIndex].outline = item.outline
+            if let arc = item.emotion_arc?.filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+               !arc.isEmpty { bp.volumes[vIndex].emotion_arc = arc }
+            if let ladder = item.conflict_ladder, !ladder.isEmpty {
+                bp.volumes[vIndex].conflict_ladder = ladder
+            }
+            if let gap = item.info_gap {
+                bp.volumes[vIndex].info_gap = gap
+            }
+        }
+        blueprint = bp
+    }
+
+    // MARK: 阶段 5：细纲分批（outlining）
+
+    /// 开始细纲阶段（卷纲补齐或用户跳过时进入）
     func startOutlining() {
         guard blueprint != nil else { return }
         refreshOutlineProgress()
@@ -235,9 +415,13 @@ final class CreationSessionViewModel: ObservableObject {
         streamTask?.cancel()
     }
 
-    /// 已生成/总章数
+    /// 已生成/总卷数、已生成/总章数
     private func refreshOutlineProgress() {
         guard let blueprint else { return }
+        volumeTotal = blueprint.volumes.count
+        volumeDone = blueprint.volumes.filter {
+            !($0.outline ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
         let all = blueprint.volumes.flatMap(\.chapters)
         outlineTotal = all.count
         outlineDone = all.filter { !($0.detailed_outline ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
@@ -261,12 +445,16 @@ final class CreationSessionViewModel: ObservableObject {
     }
 
     /// 细纲批次的上下文：梗概/风格/角色 + 目标章节所在卷的卷纲 + 最近已生成细纲
+    /// + 后续章节列表（衔接与伏笔揭晓定位）+ 需在本批揭晓的伏笔
     private func batchContext(targets: [String]) -> String {
         guard let blueprint else { return "" }
         var lines: [String] = []
         if let title = blueprint.title_suggestion, !title.isEmpty { lines.append("【书名】\(title)") }
         if let synopsis = blueprint.synopsis, !synopsis.isEmpty { lines.append("【梗概】\(synopsis)") }
         if let style = blueprint.style_guide, !style.isEmpty { lines.append("【文风约束】\(style)") }
+        if let concept = proposal?.concept, !concept.isEmpty {
+            lines.append("【已确认的故事思路】\n\(String(concept.prefix(PromptLimits.requiredFieldCap)))")
+        }
         let characters = blueprint.characters
             .compactMap { card -> String? in
                 guard let name = card.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return nil }
@@ -288,7 +476,8 @@ final class CreationSessionViewModel: ObservableObject {
         }
 
         // 最近 5 章已生成细纲（承接走向）
-        let generated = blueprint.volumes.flatMap(\.chapters).compactMap { chapter -> String? in
+        let flat = blueprint.volumes.flatMap(\.chapters)
+        let generated = flat.compactMap { chapter -> String? in
             guard let outline = chapter.detailed_outline,
                   !outline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
             return "\(chapter.title ?? "")：\(outline)"
@@ -296,7 +485,47 @@ final class CreationSessionViewModel: ObservableObject {
         if !generated.isEmpty {
             lines.append("【最近已生成细纲】\n" + generated.suffix(5).joined(separator: "\n"))
         }
+
+        // 本批之后的全部章节（衔接接口 + 伏笔揭晓章节的选择范围）
+        if let lastIndex = flat.lastIndex(where: {
+            targets.contains($0.title?.trimmingCharacters(in: .whitespaces) ?? "")
+        }), lastIndex + 1 < flat.count {
+            let upcoming = flat[(lastIndex + 1)...].compactMap { $0.title }
+            if !upcoming.isEmpty {
+                lines.append("【后续章节】\n" + upcoming.joined(separator: "\n"))
+            }
+        }
+
+        // 之前批次埋设、且计划在本批揭晓的伏笔（提示词要求对应章必须安排回收）
+        let pendingReveals = pendingForeshadows(targetTitles: targets)
+        if !pendingReveals.isEmpty {
+            lines.append("【需在本批揭晓的伏笔】\n" + pendingReveals.joined(separator: "\n"))
+        }
         return lines.joined(separator: "\n\n")
+    }
+
+    /// 已登记伏笔中 reveal_in 命中本批章节标题的条目（渲染为提示行）
+    private func pendingForeshadows(targetTitles: [String]) -> [String] {
+        guard let blueprint else { return [] }
+        let targetSet = Set(targetTitles)
+        var result: [String] = []
+        for volume in blueprint.volumes {
+            for chapter in volume.chapters {
+                guard let planted = chapter.title else { continue }
+                for fs in chapter.foreshadowings ?? [] {
+                    guard let reveal = fs.reveal_in?.trimmingCharacters(in: .whitespaces),
+                          targetSet.contains(reveal),
+                          let title = fs.title?.trimmingCharacters(in: .whitespaces),
+                          !title.isEmpty else { continue }
+                    var line = "「\(title)」→ 应在《\(reveal)》揭晓（埋设于《\(planted)》）"
+                    if let detail = fs.detail, !detail.isEmpty {
+                        line += "：\(detail)"
+                    }
+                    result.append(line)
+                }
+            }
+        }
+        return result
     }
 
     // MARK: 确认创建
@@ -401,6 +630,7 @@ final class CreationSessionViewModel: ObservableObject {
         autoContinue = false
         phase = .confirmed
         store.save()
+        detachCache()   // 作品已落库，立项会话缓存使命完成
     }
 
     // MARK: 内部
@@ -431,6 +661,7 @@ final class CreationSessionViewModel: ObservableObject {
             self.isStreaming = true
             self.draft = ""
             self.errorMessage = nil
+            self.persist()      // 流开始前记录本轮请求的上下文（批量参数/开关等）
             KeepAwake.set(true)
             self.stream(kind: kind, messages: messages, provider: provider)
         }
@@ -472,6 +703,7 @@ final class CreationSessionViewModel: ObservableObject {
             }
             self.draft = ""
             self.progress.finish()
+            self.persist()      // 流结束：settle 已改 phase/蓝图，落盘保存最新进度
             self.isStreaming = false
             KeepAwake.set(false)
         }
@@ -479,7 +711,7 @@ final class CreationSessionViewModel: ObservableObject {
 
     /// 解析失败时界面是否需要展示原始输出
     private func kindNeedsRaw(_ kind: StreamKind) -> Bool {
-        kind != .chapterBatch && kind != .clarify
+        kind != .chapterBatch && kind != .volumeBatch && kind != .clarify
     }
 
     /// 流正常结束：解析并驱动阶段转换，返回给界面的助手消息（nil 不追加）
@@ -522,7 +754,7 @@ final class CreationSessionViewModel: ObservableObject {
             blueprint = parsed
             refreshOutlineProgress()
             phase = .blueprintReady
-            return "基础蓝图已生成（含角色、世界观与各卷卷纲），可在卡片中审阅编辑。接下来可以：提出修改意见，或开始分批生成细纲。"
+            return "基础蓝图已生成（角色、世界观与卷章结构），可在卡片中审阅编辑。接下来可以：提出修改意见，或开始分批生成卷纲。"
         case .revise:
             guard let parsed = LLMJSONParser.decode(NovelBlueprint.self, fromJSONObjectIn: raw) else {
                 errorMessage = "蓝图 JSON 解析失败，可发送「重新生成」"
@@ -531,6 +763,26 @@ final class CreationSessionViewModel: ObservableObject {
             blueprint = parsed
             refreshOutlineProgress()
             return "已按你的意见修订蓝图，继续查看卡片或提出更多意见。"
+        case .volumeBatch:
+            guard let batch = LLMJSONParser.decode([VolumeOutlinePatch].self, fromJSONObjectIn: raw) else {
+                errorMessage = "卷纲批次解析失败，可重新生成本批"
+                return nil
+            }
+            applyVolumeBatch(batch)
+            refreshOutlineProgress()
+            let done = volumeDone, total = volumeTotal
+            let message = done >= total
+                ? "卷纲已全部生成（\(done)/\(total)）。可以开始分批生成细纲，或先审阅各卷卷纲。"
+                : "已生成本批卷纲（进度 \(done)/\(total)）。"
+            // 自动连续：还有剩余卷且开关开启 → 延迟接下一批卷纲
+            if autoContinue, done < total {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard self.autoContinue, !self.isStreaming, self.volumeDone < self.volumeTotal else { return }
+                    self.generateNextVolumeBatch()
+                }
+            }
+            return message
         case .chapterBatch:
             guard let batch = LLMJSONParser.decode([BlueprintChapter].self, fromJSONObjectIn: raw) else {
                 errorMessage = "细纲批次解析失败，可重新生成本批"
@@ -568,6 +820,13 @@ final class CreationSessionViewModel: ObservableObject {
                         bp.volumes[vIndex].chapters[cIndex].detailed_outline = item.detailed_outline
                         if let cards = item.scene_cards, !cards.isEmpty {
                             bp.volumes[vIndex].chapters[cIndex].scene_cards = cards
+                        }
+                        // 伏笔登记：埋设章记录 title/detail/reveal_in，揭晓章批次生成时注入提醒
+                        let foreshadows = (item.foreshadowings ?? []).filter {
+                            !($0.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                        }
+                        if !foreshadows.isEmpty {
+                            bp.volumes[vIndex].chapters[cIndex].foreshadowings = foreshadows
                         }
                         break outer
                     }

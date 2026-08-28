@@ -20,8 +20,8 @@ final class ProviderConfig: Identifiable, ObservableObject, Codable {
         self.apiKeyID = UUID().uuidString
         self.modelName = modelName
         self.temperature = 0.8
-        self.maxTokens = 4096
-        self.contextBudgetChars = 12000
+        self.maxTokens = 16384          // 现代模型默认输出预算（蓝图/细纲 JSON 很长，4096 必截断）
+        self.contextBudgetChars = 60000 // 现代模型普遍 200K+ 上下文，输入默认放宽到 6 万字符
         self.isDefault = false
     }
 
@@ -38,10 +38,14 @@ final class ProviderConfig: Identifiable, ObservableObject, Codable {
         apiKeyID = try c.decode(String.self, forKey: .apiKeyID)
         modelName = try c.decode(String.self, forKey: .modelName)
         temperature = try c.decode(Double.self, forKey: .temperature)
-        maxTokens = try c.decode(Int.self, forKey: .maxTokens)
-        contextBudgetChars = try c.decode(Int.self, forKey: .contextBudgetChars)
+        let decodedMax = try c.decode(Int.self, forKey: .maxTokens)
+        let decodedBudget = try c.decode(Int.self, forKey: .contextBudgetChars)
         systemPromptExtra = try c.decodeIfPresent(String.self, forKey: .systemPromptExtra)
         isDefault = try c.decode(Bool.self, forKey: .isDefault)
+        // 旧出厂默认迁移：v1.x 时代出厂为 4096/12000，蓝图/细纲 JSON 输出必被截断。
+        // 仅当字段「恰好等于旧出厂默认」时提升到新默认，用户手动调整过的值不动。
+        maxTokens = decodedMax == 4096 ? 16384 : decodedMax          // v1.x 出厂默认 → 新默认
+        contextBudgetChars = decodedBudget == 12000 ? 60000 : decodedBudget
     }
 
     func encode(to encoder: Encoder) throws {

@@ -130,13 +130,19 @@ struct ChatView: View {
             creation.onStreamSettled = { kind, message, raw, parsed in
                 settleCreation(kind: kind, message: message, raw: raw, parsed: parsed)
             }
-            if isCreation, thread.messages.isEmpty, input.isEmpty, !novel.synopsis.isEmpty {
-                input = novel.synopsis
+            if isCreation {
+                // 恢复上次进度（SQLite）：阶段/问答/提案/蓝图原样回来，AI上下文不丢失
+                creation.attachAndRestore(threadID: thread.id)
+                if creation.phase == .collecting, thread.messages.isEmpty,
+                   input.isEmpty, !novel.synopsis.isEmpty {
+                    input = novel.synopsis
+                }
             }
         }
         .onDisappear {
             streamTask?.cancel()
             creation.stop()
+            creation.persist()   // 兜底：退出页面时把最新进度落盘
         }
         .alert("已应用设定修改", isPresented: Binding(
             get: { appliedNotice != nil },
@@ -198,21 +204,41 @@ struct ChatView: View {
                 .animation(AppTheme.Spring.standard, value: thread.messages.count)
             }
             .zmOnChange(of: thread.messages.count) { _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                scrollListToBottom(proxy)
             }
             .zmOnChange(of: streamingText) { _ in
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
+            .zmOnChange(of: creation.progress.stage) { _ in
+                // 流式开始/进入输出/结束都触发一次，让状态行与生成结果进入视野
+                scrollListToBottom(proxy)
+            }
             .zmOnChange(of: creation.phase) { _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                scrollListToBottom(proxy)
             }
             .zmOnChange(of: creation.isStreaming) { _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                scrollListToBottom(proxy)
             }
             .zmOnChange(of: creation.outlineDone) { _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                scrollListToBottom(proxy)
+            }
+            .zmOnChange(of: creation.volumeDone) { _ in
+                scrollListToBottom(proxy)
             }
             .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+        }
+    }
+
+    /// 触底滚动 helper：大卡片/气泡插入后内容布局通常滞后一帧，
+    /// 先无动画定位、下一轮运行循环再动画滚动到「bottom」锚点，避免滚到内容中部产生空白区
+    private func scrollListToBottom(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            proxy.scrollTo("bottom", anchor: .bottom)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            withAnimation(AppTheme.Spring.standard) {
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
         }
     }
 
@@ -233,7 +259,10 @@ struct ChatView: View {
 
     private var creationActions: some View {
         VStack(spacing: AppTheme.spacing[1]) {
-            CreationStageIndicator(phase: creation.phase)
+            // 固定区流式反馈：无论列表滚动到哪，生成中这里始终可见当前状态（streaming 外 body 为空）
+            StreamingStatusView(tracker: creation.progress)
+                .frame(maxWidth: .infinity)
+            CreationStageIndicator(phase: creation.phase, volumePending: creation.volumePendingCount)
             if creation.blueprint != nil,
                creation.phase == .blueprintReady || creation.phase == .outlining {
                 Button {
@@ -480,17 +509,19 @@ struct ChatView: View {
 
 private struct CreationStageIndicator: View {
     let phase: CreationSessionViewModel.Phase
+    /// 未生成的卷纲数：blueprintReady 阶段以此为界显示「蓝图」或「卷纲」
+    var volumePending: Int = 0
 
     private var stages: [(name: String, index: Int)] {
-        [("思路", 0), ("结构", 1), ("蓝图", 2), ("细纲", 3), ("完成", 4)]
+        [("思路", 0), ("结构", 1), ("蓝图", 2), ("卷纲", 3), ("细纲", 4), ("完成", 5)]
     }
     private var currentIndex: Int {
         switch phase {
         case .collecting: return 0
         case .proposing: return 1
-        case .blueprintReady: return 2
-        case .outlining: return 3
-        case .confirmed: return 4
+        case .blueprintReady: return volumePending > 0 ? 3 : 2
+        case .outlining: return 4
+        case .confirmed: return 5
         }
     }
 
@@ -572,15 +603,54 @@ private struct StructureProposalCard: View {
     }
 }
 
-// MARK: - 细纲分批控制卡
+// MARK: - 卷纲/细纲分批控制卡
 
 private struct OutlineBatchControls: View {
     @ObservedObject var vm: CreationSessionViewModel
 
     private var allDone: Bool { vm.outlineDone >= vm.outlineTotal && vm.outlineTotal > 0 }
+    /// 卷纲是否全部就绪（无卷或全部已生成）
+    private var volumesReady: Bool { vm.volumePendingCount == 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+            // 卷纲批次：未全部生成时优先展示（细纲依赖卷纲）
+            if !volumesReady {
+                Label("卷纲进度 \(vm.volumeDone)/\(vm.volumeTotal) 卷", systemImage: "books.vertical")
+                    .font(.subheadline.weight(.semibold))
+                HStack(spacing: AppTheme.spacing[2]) {
+                    Picker("每轮", selection: $vm.volumesPerBatch) {
+                        Text("1 卷").tag(1)
+                        Text("2 卷").tag(2)
+                        Text("3 卷").tag(3)
+                        Text("4 卷").tag(4)
+                        Text("5 卷").tag(5)
+                    }
+                    .pickerStyle(.segmented)
+                    Toggle("自动连续", isOn: $vm.autoContinue)
+                        .font(.footnote)
+                }
+                if vm.isStreaming {
+                    Button {
+                        vm.stop()
+                    } label: {
+                        Label("停止生成", systemImage: "stop.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button {
+                        vm.generateNextVolumeBatch()
+                    } label: {
+                        Label("生成下一批卷纲", systemImage: "books.vertical")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+
+            Divider().opacity(volumesReady ? 0 : 0.5)
+
             Label("细纲进度 \(vm.outlineDone)/\(vm.outlineTotal) 章", systemImage: "chart.bar.doc.horizontal")
                 .font(.subheadline.weight(.semibold))
 
@@ -588,7 +658,7 @@ private struct OutlineBatchControls: View {
                 Label("细纲已全部生成，点下方「创建作品」落库", systemImage: "checkmark.seal.fill")
                     .font(.footnote)
                     .foregroundStyle(.green)
-            } else {
+            } else if volumesReady {
                 HStack(spacing: AppTheme.spacing[2]) {
                     Picker("每轮", selection: $vm.chaptersPerBatch) {
                         Text("1 章").tag(1)
@@ -617,6 +687,10 @@ private struct OutlineBatchControls: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
+            } else {
+                Text("先生成卷纲，完成后即可分批生成细纲")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(AppTheme.spacing[2])

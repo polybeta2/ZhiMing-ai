@@ -107,6 +107,24 @@ enum PromptTemplates {
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
+    /// 卷纲批次：只为 targets 中的卷生成卷纲（每批 1~5 卷）
+    static func creationVolumeBatch(context: String, targets: [String], supplement: String?) -> [LLMMessage] {
+        var system = PromptLibrary.shared.resolvedText(for: PromptID.creationVolumeBatch)
+        if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !supplement.isEmpty {
+            system += "\n\n" + supplement
+        }
+        let list = targets.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        let user = """
+        【作品背景】
+        \(context)
+
+        【本批待生成卷】
+        \(list)
+        """
+        return [.init(role: .system, content: system), .init(role: .user, content: user)]
+    }
+
     /// 细纲批次：只为 targets 中的章节生成细纲
     static func creationChapterBatch(context: String, targets: [String], supplement: String?) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationChapterBatch)

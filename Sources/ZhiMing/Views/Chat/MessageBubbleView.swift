@@ -1,11 +1,12 @@
 import SwiftUI
 
 /// 消息气泡 + 流式光标 + Markdown 轻量渲染（AttributedString）
-/// 用户：右对齐强调色气泡；AI：左对齐毛玻璃材质气泡
+/// 用户：右对齐强调色气泡（暗色模式降透明度防刺眼）；AI：左对齐实心卡片气泡
 struct MessageBubbleView: View {
     let role: String                     // user / assistant
     let text: String
     var isStreaming = false
+    @Environment(\.colorScheme) private var scheme
 
     private var isUser: Bool { role == "user" }
 
@@ -67,13 +68,12 @@ struct MessageBubbleView: View {
         let shape = BubbleShape(isUser: isUser)
         if isUser {
             // iMessage 惯例：强调色实心渐变气泡，尾侧小圆角
+            // 暗色模式降低不透明度（黑色底透出即等效变暗），避免大面积高饱和刺眼
+            let top = scheme == .dark ? Color.accentColor.opacity(0.72) : Color.accentColor
+            let bottom = scheme == .dark ? Color.accentColor.opacity(0.55) : Color.accentColor.opacity(0.82)
             shape
-                .fill(LinearGradient(
-                    colors: [Color.accentColor, Color.accentColor.opacity(0.82)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ))
-                .shadow(color: Color.accentColor.opacity(0.28), radius: 6, x: 0, y: 3)
+                .fill(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
+                .shadow(color: Color.accentColor.opacity(scheme == .dark ? 0.18 : 0.28), radius: 6, x: 0, y: 3)
         } else {
             // 不叠淡色毛玻璃：实心次级背景 + 发丝描边，保证任何底色上可读
             shape
