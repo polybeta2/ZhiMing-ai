@@ -19,3 +19,4 @@ Thumbs.db
 # ---- 本地工具与私有资料（不入库） ----
 .codegraph/
 /docs
+/.trae/
