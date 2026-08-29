@@ -61,6 +61,9 @@ struct NovelListView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: AppTheme.spacing[2]) {
+                        NavigationLink(destination: StyleLibraryView()) {
+                            Image(systemName: "textformat")
+                        }
                         NavigationLink(destination: SettingsView()) {
                             Image(systemName: "gearshape")
                         }

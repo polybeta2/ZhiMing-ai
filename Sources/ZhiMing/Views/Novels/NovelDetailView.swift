@@ -90,6 +90,12 @@ private struct NovelSettingsTab: View {
         )
     }
 
+    /// 本书绑定的文风档案名（nil = 未启用）
+    private var boundStyleName: String? {
+        guard let id = novel.activeStyleProfileID else { return nil }
+        return store.styleProfiles.first { $0.id == id }?.name
+    }
+
     private func applyR18(_ enabled: Bool) {
         novel.r18Enabled = enabled
         if enabled {
@@ -137,6 +143,18 @@ private struct NovelSettingsTab: View {
                         }
                     } icon: {
                         ZMSettingsIcon(systemName: "list.number", tint: .indigo)
+                    }
+                }
+                NavigationLink(destination: StylePickerView(novel: novel)) {
+                    Label {
+                        HStack {
+                            Text("文风档案")
+                            Spacer()
+                            Text(boundStyleName ?? "未启用")
+                                .foregroundColor(.secondary)
+                        }
+                    } icon: {
+                        ZMSettingsIcon(systemName: "textformat", tint: .orange)
                     }
                 }
             }
