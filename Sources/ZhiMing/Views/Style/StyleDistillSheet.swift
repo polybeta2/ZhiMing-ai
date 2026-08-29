@@ -3,7 +3,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 import ZhiMingCore
 
-/// 蒸馏向导：来源（粘贴/导入文件/书库选书）→ 分阶段进度 → 完成自动入库
+/// 蒸馏向导：来源（粘贴/导入文件/书库选书）→ 分阶段进度 → 完成自动入库。
+/// 传入 augmentTarget 时为「追加样本」模式：结果合并进该档案（层字段以新样本为准，规则并集）。
 struct StyleDistillSheet: View {
     private enum SourceKind: String, CaseIterable, Identifiable {
         case paste = "粘贴"
@@ -11,6 +12,8 @@ struct StyleDistillSheet: View {
         case book = "书库选书"
         var id: String { rawValue }
     }
+
+    var augmentTarget: StyleProfile? = nil
 
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -54,6 +57,13 @@ struct StyleDistillSheet: View {
                         resumeSection(resume)
                     }
                     sourceSection
+                    if let target = augmentTarget {
+                        Section {
+                            Label("追加模式：将为档案「\(target.name)」合并新样本——层字段以新样本为准，标签与规则取并集，示范对照替换为新样本产物，全部变化记入修正日志。", systemImage: "arrow.triangle.merge")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     if vm.isFailed {
                         Section {
                             Label(vm.phaseLabel, systemImage: "xmark.octagon.fill")
@@ -66,7 +76,7 @@ struct StyleDistillSheet: View {
                     progressSection
                 }
             }
-            .navigationTitle("蒸馏文风档案")
+            .navigationTitle(augmentTarget == nil ? "蒸馏文风档案" : "追加样本蒸馏")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -16,7 +16,7 @@ final class StyleDistillationViewModel: ObservableObject {
     private var task: Task<Void, Never>?
 
     func run(sourceText: String, sourceNote: String, provider: ProviderConfig,
-             cachedAnalysisRaw: String? = nil) {
+             cachedAnalysisRaw: String? = nil, augmentTarget: StyleProfile? = nil) {
         guard phase == .idle || isFailed else { return }
         guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
               let baseUrl = URL(string: provider.baseUrl) else {
@@ -38,7 +38,8 @@ final class StyleDistillationViewModel: ObservableObject {
                     analyzeSystem: library.resolvedText(for: PromptID.styleDistillAnalyze),
                     cardSystem: library.resolvedText(for: PromptID.styleDistillCard),
                     fixSystem: library.resolvedText(for: PromptID.styleDistillFix),
-                    cachedAnalysisRaw: cachedAnalysisRaw
+                    cachedAnalysisRaw: cachedAnalysisRaw,
+                    augmentTarget: augmentTarget
                 ) {
                     switch event {
                     case .phase(let p):
@@ -47,7 +48,10 @@ final class StyleDistillationViewModel: ObservableObject {
                         self?.progress.handle(s)
                     case .analysisReady(let raw):
                         // S2 是最贵的一次调用：完成即落缓存，之后失败/中断可从 S3 恢复
-                        StyleDistillCache.save(sourceText: sourceText, sourceNote: sourceNote, analysisRaw: raw)
+                        // （追加模式不落缓存：恢复时缺 augmentTarget 会误当新蒸馏）
+                        if augmentTarget == nil {
+                            StyleDistillCache.save(sourceText: sourceText, sourceNote: sourceNote, analysisRaw: raw)
+                        }
                     case .completed(let profile):
                         self?.result = profile
                         StyleDistillCache.remove()

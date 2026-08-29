@@ -152,7 +152,8 @@ public final class StyleDistillationService {
 
     public func events(sourceText: String, sourceNote: String,
                        analyzeSystem: String, cardSystem: String, fixSystem: String,
-                       cachedAnalysisRaw: String? = nil) -> AsyncThrowingStream<StyleDistillEvent, Error> {
+                       cachedAnalysisRaw: String? = nil,
+                       augmentTarget: StyleProfile? = nil) -> AsyncThrowingStream<StyleDistillEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -162,14 +163,14 @@ public final class StyleDistillationService {
                     let samples = StyleMetrics.sampleSegments(in: sourceText, maxChars: PromptLimits.styleSampleCap)
                     guard !samples.isEmpty else { throw StyleDistillError.emptySource }
 
-                    let profile = StyleProfile(name: sourceNote.isEmpty ? "未命名文风" : String(sourceNote.prefix(20)),
-                                               sourceNote: sourceNote,
-                                               sampleCharCount: sourceText.count)
-                    profile.localMetrics = metrics
+                    let fresh = StyleProfile(name: sourceNote.isEmpty ? "未命名文风" : String(sourceNote.prefix(20)),
+                                             sourceNote: sourceNote,
+                                             sampleCharCount: sourceText.count)
+                    fresh.localMetrics = metrics
 
                     // S2 机制分析：命中可用缓存则跳过 LLM 调用（中断/失败恢复路径）
                     if let analysis = cachedAnalysisRaw.flatMap({ LLMJSONParser.decode(StyleAnalysisDraft.self, fromJSONObjectIn: $0) }) {
-                        analysis.apply(to: profile)
+                        analysis.apply(to: fresh)
                         continuation.yield(.phase(.buildingCard))
                     } else {
                         continuation.yield(.phase(.analyzing))
@@ -177,23 +178,32 @@ public final class StyleDistillationService {
                         guard let analysis = LLMJSONParser.decode(StyleAnalysisDraft.self, fromJSONObjectIn: analysisRaw) else {
                             throw StyleDistillError.parseFailed("机制分析")
                         }
-                        analysis.apply(to: profile)
+                        analysis.apply(to: fresh)
                         continuation.yield(.analysisReady(analysisRaw))
                         continuation.yield(.phase(.buildingCard))
                     }
 
                     // S3 风格卡与示例
-                    let cardRaw = try await complete(messages(cardSystem, cardUser(profile)))
+                    let cardRaw = try await complete(messages(cardSystem, cardUser(fresh)))
                     guard let card = LLMJSONParser.decode(StyleCardDraft.self, fromJSONObjectIn: cardRaw) else {
                         throw StyleDistillError.parseFailed("风格卡")
                     }
-                    card.apply(to: profile)
+                    card.apply(to: fresh)
+
+                    // 增量模式：深拷贝目标档案合并新样本（id 不变，upsert 即更新；原档案不动，采纳与否由用户决定）
+                    let result: StyleProfile
+                    if let target = augmentTarget, let working = Self.copyOf(target) {
+                        StyleProfileAugment.merge(existing: working, fresh: fresh, reason: "追加样本" + sourceNote)
+                        result = working
+                    } else {
+                        result = fresh
+                    }
 
                     // S4 查重校验
                     continuation.yield(.phase(.checking))
-                    try await checkAndFix(profile: profile, sourceText: sourceText, fixSystem: fixSystem)
+                    try await checkAndFix(profile: result, sourceText: sourceText, fixSystem: fixSystem)
 
-                    continuation.yield(.completed(profile))
+                    continuation.yield(.completed(result))
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -201,6 +211,12 @@ public final class StyleDistillationService {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// 档案深拷贝（Codable 往返）；失败返回 nil，调用方回退为全新蒸馏
+    private static func copyOf(_ profile: StyleProfile) -> StyleProfile? {
+        guard let data = try? JSONEncoder().encode(profile) else { return nil }
+        return try? JSONDecoder().decode(StyleProfile.self, from: data)
     }
 
     // MARK: 消息装配

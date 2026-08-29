@@ -16,6 +16,7 @@ struct StyleProfileDetailView: View {
     @State private var avoidRules: [String]
     @State private var dirty = false
     @State private var showDelete = false
+    @State private var showAugment = false
 
     init(profile: StyleProfile) {
         self.profile = profile
@@ -32,6 +33,7 @@ struct StyleProfileDetailView: View {
             examplesSection
             layersSection
             metricsSection
+            correctionsSection
             infoSection
         }
         .navigationTitle(profile.name)
@@ -55,6 +57,9 @@ struct StyleProfileDetailView: View {
                 dismiss()
             }
         }
+        .sheet(isPresented: $showAugment) {
+            StyleDistillSheet(augmentTarget: profile)
+        }
         .onDisappear { if dirty { save() } }
     }
 
@@ -70,6 +75,11 @@ struct StyleProfileDetailView: View {
                 .onChange(of: summary) { _ in dirty = true }
             StringListEditor(title: "必遵规则", items: $mustRules) { dirty = true }
             StringListEditor(title: "反面清单", items: $avoidRules) { dirty = true }
+            Button {
+                showAugment = true
+            } label: {
+                Label("追加样本再蒸馏…", systemImage: "arrow.triangle.merge")
+            }
         }
     }
 
@@ -168,6 +178,30 @@ struct StyleProfileDetailView: View {
             LabeledRow(label: "来源", value: profile.sourceNote.isEmpty ? "（未填写）" : profile.sourceNote)
             LabeledRow(label: "样本字数", value: "\(profile.sampleCharCount)")
             LabeledRow(label: "置信度", value: profile.confidence)
+        }
+    }
+
+    // MARK: 修正日志（追加样本/人工调整的历史，最新在后）
+
+    private var correctionsSection: some View {
+        Section("修正记录") {
+            if profile.corrections.isEmpty {
+                Text("（无）").foregroundStyle(.secondary)
+            }
+            ForEach(Array(profile.corrections.suffix(10).reversed())) { correction in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(correction.field)：\(correction.before) → \(correction.after)")
+                        .font(.caption2)
+                    Text("\(correction.reason) · \(correction.date.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if profile.corrections.count > 10 {
+                Text("（仅显示最近 10 条，共 \(profile.corrections.count) 条）")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
