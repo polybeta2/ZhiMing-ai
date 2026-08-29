@@ -34,6 +34,7 @@ struct StyleLibraryView: View {
     @EnvironmentObject private var store: AppStore
     @State private var showDistill = false
     @State private var showFusion = false
+    @State private var showTransfer = false
     @State private var deletingProfile: StyleProfile?
 
     var body: some View {
@@ -87,6 +88,15 @@ struct StyleLibraryView: View {
                             Image(systemName: "arrow.triangle.merge")
                         }
                     }
+                    Menu {
+                        Button {
+                            showTransfer = true
+                        } label: {
+                            Label("导入 / 导出", systemImage: "arrow.up.arrow.down")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
                     Button {
                         showDistill = true
                     } label: {
@@ -97,6 +107,7 @@ struct StyleLibraryView: View {
         }
         .sheet(isPresented: $showDistill) { StyleDistillSheet() }
         .sheet(isPresented: $showFusion) { StyleFusionSheet() }
+        .sheet(isPresented: $showTransfer) { StyleTransferSheet() }
         .sheet(item: $deletingProfile) { profile in
             DeleteConfirmSheet(
                 title: "删除「\(profile.name)」？",
