@@ -60,4 +60,56 @@ struct StylePickerView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
+
+/// 编辑器会话内文风三态选择（不落库，仅当前编辑页生效）
+struct SessionStylePickerSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selection: ChapterEditorView.SessionStyle
+    let novel: Novel?
+
+    var body: some View {
+        CompatNavigationView {
+            List {
+                Section(footer: Text("仅对当前编辑页生效，不写入书籍设置；长期启用请到「设定 → 文风档案」绑定。")) {
+                    row(.followBook,
+                        title: "跟随书籍绑定",
+                        subtitle: novel.flatMap { $0.activeStyleProfile(in: store.styleProfiles) }?.name ?? "（书未绑定档案）")
+                    row(.off, title: "不启用", subtitle: nil)
+                    ForEach(store.styleProfiles) { profile in
+                        row(.custom(profile.id), title: profile.name,
+                            subtitle: profile.tags.isEmpty ? nil : profile.tags.joined(separator: " · "))
+                    }
+                }
+            }
+            .navigationTitle("会话文风")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func row(_ value: ChapterEditorView.SessionStyle, title: String, subtitle: String?) -> some View {
+        Button {
+            selection = value
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    if let subtitle {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if selection == value {
+                    Image(systemName: "checkmark")
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
 #endif

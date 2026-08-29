@@ -19,7 +19,7 @@ final class WritingSessionViewModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
 
     func start(mode: Mode, chapter: Chapter, novel: Novel, provider: ProviderConfig,
-               instruction: String?, styleProfiles: [StyleProfile] = []) {
+               instruction: String?, styleCard: String? = nil) {
         guard phase != .streaming else { return }
         draft = ""
         errorMessage = nil
@@ -43,14 +43,8 @@ final class WritingSessionViewModel: ObservableObject {
             r18Text = nil
         }
 
-        // 文风档案注入卡：撰写/续写/改写/润色/扩写用 .writing，去AI味用 .antiAI（渲染器已按预算裁剪）
-        let styleCard: String?
-        switch mode {
-        case .rewrite(let rewriteMode, _) where rewriteMode == "去AI味":
-            styleCard = novel.styleProfileCard(in: styleProfiles, variant: .antiAI)
-        default:
-            styleCard = novel.styleProfileCard(in: styleProfiles, variant: .writing)
-        }
+        // 文风档案注入卡由调用方解析（支持会话级临时切换），渲染器已按各 variant 预算裁剪；
+        // 撰写/续写/改写/润色/扩写用 .writing，去AI味用 .antiAI
 
         let baseMessages: [LLMMessage]
         switch mode {

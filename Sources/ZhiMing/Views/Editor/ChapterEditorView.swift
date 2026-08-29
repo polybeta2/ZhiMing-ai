@@ -22,6 +22,12 @@ struct ChapterEditorView: View {
     // 会话内模型切换（仅当前编辑器生效）
     @State private var sessionProvider: ProviderConfig?
     @State private var showModelSelector = false
+    /// 会话内文风档案三态：跟随书籍绑定 / 临时关闭 / 临时指定（不落库）
+    enum SessionStyle: Equatable {
+        case followBook, off, custom(UUID)
+    }
+    @State private var sessionStyle: SessionStyle = .followBook
+    @State private var showStylePicker = false
     /// 进入页面时的默认提供商快照：避免 body 直接读 store 而订阅全局刷新——
     /// 每次防抖保存都会触达全局 objectWillChange，长文编辑时会把编辑器整树重算，造成卡顿
     @State private var cachedDefaultProvider: ProviderConfig?
@@ -137,6 +143,9 @@ struct ChapterEditorView: View {
         .sheet(isPresented: $showModelSelector) {
             ModelSelectorSheet(selection: $sessionProvider)
         }
+        .sheet(isPresented: $showStylePicker) {
+            SessionStylePickerSheet(selection: $sessionStyle, novel: novel)
+        }
         .alert("尚未配置模型提供商", isPresented: $showNoProviderAlert) {
             Button("去设置") { showSettings = true }
             Button("取消", role: .cancel) {}
@@ -165,6 +174,24 @@ struct ChapterEditorView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "cpu")
                         Text(activeProvider?.modelName ?? "未配置")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 84)
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                }
+                .buttonStyle(.zmPress)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+
+                // 会话内文风档案切换（三态胶囊，点击弹选择页）
+                Button {
+                    showStylePicker = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "textformat")
+                        Text(sessionStyleLabel)
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .frame(maxWidth: 84)
@@ -239,6 +266,41 @@ struct ChapterEditorView: View {
         return true
     }
 
+    // MARK: - 会话内文风档案解析（P1 会话级三态，不落库）
+
+    private var sessionStyleLabel: String {
+        switch sessionStyle {
+        case .followBook:
+            if let novel, let id = novel.activeStyleProfileID,
+               let p = store.styleProfiles.first(where: { $0.id == id }) {
+                return "文风:\(p.name)"
+            }
+            return "文风:未绑定"
+        case .off: return "文风:关"
+        case .custom(let id):
+            return store.styleProfiles.first { $0.id == id }.map { "文风:\($0.name)" } ?? "文风:失效"
+        }
+    }
+
+    /// 按会话三态解析当前生效档案；nil = 本次请求不注入档案卡
+    private func resolveSessionProfile() -> StyleProfile? {
+        guard let novel else { return nil }
+        switch sessionStyle {
+        case .followBook:
+            return novel.activeStyleProfile(in: store.styleProfiles)
+        case .off:
+            return nil
+        case .custom(let id):
+            return store.styleProfiles.first { $0.id == id }
+        }
+    }
+
+    private func styleCard(variant: StyleCardVariant) -> String? {
+        guard let profile = resolveSessionProfile() else { return nil }
+        let card = StyleCardRenderer.render(profile, variant: variant)
+        return card.isEmpty ? nil : card
+    }
+
     // MARK: - 生成流程
 
     private func startContinue(wordTarget: Int, instruction: String?) {
@@ -252,7 +314,7 @@ struct ChapterEditorView: View {
             novel: novel,
             provider: provider,
             instruction: instruction,
-            styleProfiles: store.styleProfiles
+            styleCard: styleCard(variant: .writing)
         )
     }
 
@@ -276,7 +338,7 @@ struct ChapterEditorView: View {
             novel: novel,
             provider: provider,
             instruction: effectiveInstruction,
-            styleProfiles: store.styleProfiles
+            styleCard: styleCard(variant: mode == "去AI味" ? .antiAI : .writing)
         )
     }
 
