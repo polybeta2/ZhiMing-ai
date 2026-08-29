@@ -133,4 +133,13 @@ public extension Novel {
         let card = StyleCardRenderer.render(profile, variant: variant)
         return card.isEmpty ? nil : card
     }
+
+    /// 立项阶段的蓝图对齐补充注入（P2）：要求蓝图 style_guide 与绑定档案一致，
+    /// 避免蓝图落库后手填风格与档案两套约束打架。未绑定档案返回 nil。
+    func blueprintAlignmentSupplement(in profiles: [StyleProfile]) -> String? {
+        guard let profile = activeStyleProfile(in: profiles) else { return nil }
+        let card = StyleCardRenderer.render(profile, variant: .outline)
+        guard !card.isEmpty else { return nil }
+        return "【文风档案对齐】\n蓝图生成的 style_guide 字段必须与以下文风档案保持一致（视角/基调/节奏/对白习惯），不得另起炉灶：\n" + card
+    }
 }

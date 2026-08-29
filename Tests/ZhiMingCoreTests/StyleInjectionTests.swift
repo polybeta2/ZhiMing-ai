@@ -52,4 +52,19 @@ final class StyleInjectionTests: XCTestCase {
         }
         XCTAssertFalse(plain.contains("【文风档案"))
     }
+
+    func testBlueprintAlignmentSupplement() {
+        let novel = Fixtures.makeNovel()
+        // 未绑定档案 → nil
+        XCTAssertNil(novel.blueprintAlignmentSupplement(in: []))
+
+        let profile = StyleProfile(name: "冷峻白描")
+        profile.tags = ["冷峻"]
+        novel.activeStyleProfileID = profile.id
+        let supplement = novel.blueprintAlignmentSupplement(in: [profile])
+        let text = try! XCTUnwrap(supplement)
+        XCTAssertTrue(text.contains("【文风档案对齐】"))
+        XCTAssertTrue(text.contains("style_guide"))
+        XCTAssertTrue(text.contains("【文风档案：冷峻白描】"))
+    }
 }

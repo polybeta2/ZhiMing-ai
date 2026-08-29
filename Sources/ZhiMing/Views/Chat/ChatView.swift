@@ -364,9 +364,21 @@ struct ChatView: View {
         novel.r18Enabled ? PromptLibrary.shared.r18Supplement(forInput: text) : nil
     }
 
+    /// 文风档案对齐注入（P2）：蓝图 style_guide 须与绑定档案一致
+    private func alignmentSupplement() -> String? {
+        novel.blueprintAlignmentSupplement(in: store.styleProfiles)
+    }
+
     /// 完整思路立项自动启动时的补充注入：按 synopsis 语言注入 R18 规范（无标签注入）
     private func fullIdeaSupplement() -> String? {
-        novel.r18Enabled ? PromptLibrary.shared.r18Supplement(forInput: novel.synopsis) : nil
+        var parts: [String] = []
+        if novel.r18Enabled {
+            parts.append(PromptLibrary.shared.r18Supplement(forInput: novel.synopsis))
+        }
+        if let alignment = alignmentSupplement() {
+            parts.append(alignment)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 
     private func routeCreation(text: String) {
@@ -389,15 +401,24 @@ struct ChatView: View {
             if novel.r18Enabled {
                 parts.append(PromptLibrary.shared.r18Supplement(forInput: text))
             }
+            if let alignment = alignmentSupplement() {
+                parts.append(alignment)
+            }
             let supplement = parts.isEmpty ? nil : parts.joined(separator: "\n\n")
             creation.sendCollecting(text: text, provider: provider, supplement: supplement)
         case .proposing:
             creation.sendProposalFeedback(text)
         case .blueprintReady, .outlining, .confirmed:
-            // 已有蓝图：作为修订意见（R18 书籍同样携带对应语言规范）
-            var reviseSupplement: String?
+            // 已有蓝图：作为修订意见（R18 书籍同样携带对应语言规范与文风对齐）
+            var reviseSupplement: String? = nil
+            if let alignment = alignmentSupplement() {
+                reviseSupplement = alignment
+            }
             if novel.r18Enabled {
-                reviseSupplement = PromptLibrary.shared.r18Supplement(forInput: text)
+                let r18 = PromptLibrary.shared.r18Supplement(forInput: text)
+                if let r18 {
+                    reviseSupplement = reviseSupplement.map { $0 + "\n\n" + r18 } ?? r18
+                }
             }
             creation.revise(feedback: text, provider: provider, supplement: reviseSupplement)
         }
