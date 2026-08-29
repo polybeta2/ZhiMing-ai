@@ -155,8 +155,20 @@ struct ChatView: View {
                 creation.attachAndRestore(threadID: thread.id)
                 // provider 不入缓存：恢复后重新注入，否则确认结构/发送消息的 guard 会短路
                 creation.setProvider(activeProvider)
-                if creation.phase == .collecting, thread.messages.isEmpty,
-                   input.isEmpty, !novel.synopsis.isEmpty {
+                // 完整思路立项：跳过澄清，进入对话即自动规划卷章结构
+                if thread.skipsClarification, creation.phase == .collecting,
+                   thread.messages.isEmpty, !novel.synopsis.isEmpty {
+                    if let provider = activeProvider {
+                        appendAssistant("已收到你的完整思路，正在直接规划卷章结构…")
+                        let userMessage = ChatMessage(role: "user", content: novel.synopsis)
+                        userMessage.thread = thread
+                        thread.messages.append(userMessage)
+                        creation.sendFullIdea(text: novel.synopsis, provider: provider,
+                                              supplement: fullIdeaSupplement())
+                        store.save()
+                    }
+                } else if creation.phase == .collecting, thread.messages.isEmpty,
+                          input.isEmpty, !novel.synopsis.isEmpty {
                     input = novel.synopsis
                 }
             }
@@ -345,6 +357,16 @@ struct ChatView: View {
 
     // MARK: - 立项路由
 
+    /// R18 书籍的规范注入（完整思路立项共用）
+    private func r18Supplement(for text: String) -> String? {
+        novel.r18Enabled ? PromptLibrary.shared.r18Supplement(forInput: text) : nil
+    }
+
+    /// 完整思路立项自动启动时的补充注入：按 synopsis 语言注入 R18 规范（无标签注入）
+    private func fullIdeaSupplement() -> String? {
+        novel.r18Enabled ? PromptLibrary.shared.r18Supplement(forInput: novel.synopsis) : nil
+    }
+
     private func routeCreation(text: String) {
         guard let provider = activeProvider else { return }
         // 会话恢复/切换模型后统一重注入，保证提案反馈、修订等非直传 provider 的分支可用
@@ -352,6 +374,11 @@ struct ChatView: View {
 
         switch creation.phase {
         case .collecting:
+            // 完整思路立项：collecting 阶段的消息一律直通结构规划（含重试「重新生成」）
+            if thread.skipsClarification {
+                creation.sendFullIdea(text: text, provider: provider, supplement: r18Supplement(for: text))
+                return
+            }
             // 智能注入：仅「已启用标签」且输入命中其关键词时，才附加预设内容
             var parts: [String] = []
             if let tags = PromptLibrary.shared.matchedSupplement(enabledIDs: novel.enabledTagIDs, input: text) {

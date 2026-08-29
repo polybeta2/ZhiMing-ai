@@ -301,6 +301,9 @@ final class CreationSessionViewModel: ObservableObject {
 
     // MARK: 阶段 1：澄清提问（collecting）
 
+    /// brief 是否尚未填充（供界面路由判断：完整思路首次启动 or 重试）
+    var briefIsEmpty: Bool { brief.isEmpty }
+
     /// 用户在 collecting 发送消息：首条为创意，其余为对问题的回答
     func sendCollecting(text: String, provider: ProviderConfig, supplement: String?) {
         if brief.isEmpty {
@@ -312,6 +315,17 @@ final class CreationSessionViewModel: ObservableObject {
         self.supplement = supplement
         persist()       // 创意/回答先落盘，防中途退出丢上下文
         requestClarify()
+    }
+
+    /// 完整思路立项：跳过澄清问答，直接规划卷章结构。
+    /// brief 已存在时为重试语义（如结构解析失败后发「重新生成」），忽略新文本；
+    /// 用户想补充思路 → 等结构提案卡出现后走「修改意见」（proposing 流程）。
+    func sendFullIdea(text: String, provider: ProviderConfig, supplement: String?) {
+        if brief.isEmpty { brief = text }
+        self.provider = provider
+        self.supplement = supplement
+        persist()
+        requestStructure(feedback: nil)
     }
 
     private func requestClarify() {

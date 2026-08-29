@@ -8,7 +8,7 @@ struct NovelCreateSheet: View {
     /// 创建成功回调（传入新作品 id，由首页负责跳转）
     var onCreated: (UUID) -> Void = { _ in }
 
-    private enum Mode { case choose, blank, oneLine }
+    private enum Mode { case choose, blank, oneLine, fullIdea }
     @State private var mode: Mode = .choose
 
     // 空白建书表单
@@ -20,6 +20,10 @@ struct NovelCreateSheet: View {
 
     // 一句话立项
     @State private var brief = ""
+
+    // 完整思路立项
+    @State private var fullIdeaTitle = ""
+    @State private var fullIdeaText = ""
     /// 已启用的示例标签 id（保存到作品，生成蓝图时按关键词命中注入）
     @State private var selectedTagIDs: Set<String> = []
     @State private var previewTag: PromptTag?
@@ -39,6 +43,7 @@ struct NovelCreateSheet: View {
                 case .choose: chooseView
                 case .blank: blankForm
                 case .oneLine: oneLineView
+                case .fullIdea: fullIdeaView
                 }
             }
             .navigationTitle(titleForMode)
@@ -56,6 +61,7 @@ struct NovelCreateSheet: View {
         case .choose: return "新建作品"
         case .blank: return "空白建书"
         case .oneLine: return "一句话立项"
+        case .fullIdea: return "完整思路立项"
         }
     }
 
@@ -76,6 +82,13 @@ struct NovelCreateSheet: View {
                 subtitle: "说出你的创意，AI 生成主题、角色、世界观与卷纲蓝图"
             ) {
                 mode = .oneLine
+            }
+            entryCard(
+                icon: "doc.text.magnifyingglass",
+                title: "完整思路立项",
+                subtitle: "已有完整设定或大纲，跳过问答直接规划卷章结构"
+            ) {
+                mode = .fullIdea
             }
             Spacer()
         }
@@ -181,6 +194,77 @@ struct NovelCreateSheet: View {
         let volume = Volume(name: "第一卷", sortOrder: 1)
         volume.novel = novel
         novel.volumes.append(volume)
+
+        store.novels.append(novel)
+        store.save()
+        onCreated(novel.id)
+    }
+
+    // MARK: - 完整思路立项
+
+    /// 已有完整思路：跳过澄清问答，进入对话直接规划卷章结构
+    private var fullIdeaView: some View {
+        VStack(spacing: AppTheme.spacing[2]) {
+            Text("粘贴你的完整思路（世界观、人物、核心冲突、关键情节、结局方向），AI 将跳过问答直接规划卷章结构。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            TextField("书名（可选，留空取思路开头）", text: $fullIdeaTitle)
+                .padding(AppTheme.spacing[2])
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+
+            MultilineField(
+                text: $fullIdeaText,
+                placeholder: "在此粘贴完整思路：\n· 世界观与背景设定\n· 主要人物与关系\n· 核心冲突与主线走向\n· 关键情节节点（如男女主初遇、重大转折）\n· 结局方向…",
+                minHeight: 220
+            )
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: AppTheme.radiusCard))
+
+            // R18 开关 + 内联确认（与其他建书方式共用）
+            VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+                Toggle(isOn: r18Binding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("R18 增强（虚构情色写作辅助）").font(.subheadline)
+                        Text(r18Enabled ? "已开启：注入本地打包的 R18 写作规范（按语言二选一），强调色锁定血红" : "为本书开启成人向写作规范注入")
+                            .font(.caption2)
+                            .foregroundStyle(r18Enabled ? Color.red : .secondary)
+                    }
+                }
+                if showR18Notice {
+                    r18ConfirmCard()
+                }
+            }
+
+            Button {
+                createFromFullIdea()
+            } label: {
+                Label("开始立项", systemImage: "doc.text.magnifyingglass")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, AppTheme.spacing[1])
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(fullIdeaText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(AppTheme.spacing[3])
+    }
+
+    private func createFromFullIdea() {
+        let text = fullIdeaText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        let name = fullIdeaTitle.trimmingCharacters(in: .whitespaces)
+        let displayTitle = !name.isEmpty ? name
+            : (text.count <= 14 ? text : String(text.prefix(14)) + "…")
+        let novel = Novel(title: displayTitle, synopsis: text)
+        novel.accentColorHex = r18Enabled ? Novel.r18AccentHex : AppTheme.accentPresets[0].hexString
+        novel.r18Enabled = r18Enabled
+
+        // 完整思路立项：标记跳过澄清，ChatView 进入时直接规划卷章结构
+        let thread = ChatThread(purpose: "creation")
+        thread.skipsClarification = true
+        thread.novel = novel
+        novel.chatThreads.append(thread)
 
         store.novels.append(novel)
         store.save()

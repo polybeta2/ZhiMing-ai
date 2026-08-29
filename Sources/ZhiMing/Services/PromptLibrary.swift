@@ -18,9 +18,8 @@ enum PromptLimits {
     static let requiredFieldCap = 4_000
     /// 写作助手聊天历史的单条消息截断线
     static let historyMessageCap = 2_000
-    /// 发送前总字符告警线：超过则弹确认框（PromptGuard）。现代模型普遍 200K~1M 上下文，
-    /// v2.2.0 由 80K 放宽到 200K，仅在真正逼近上下文上限时才打扰用户。
-    static let requestWarnChars = 200_000
+    /// 发送前总字符告警线：超过则弹确认框（PromptGuard）
+    static let requestWarnChars = 80_000
     /// 伏笔提醒触发阈值：埋设距今超过 N 章即提醒
     static let foreshadowReminderChapterThreshold = 8
     /// 未回收伏笔提醒整段字符上限（可选层，硬裁尾）
