@@ -23,6 +23,8 @@ struct StyleDistillSheet: View {
     @State private var sourceNote = ""
     @State private var showImporter = false
     @State private var saved = false
+    /// 上次未完成的蒸馏（S2 已缓存），可从风格卡阶段恢复
+    @State private var cachedResume: StyleDistillCache.Payload?
 
     private var bookText: String {
         guard let id = selectedBookID,
@@ -48,6 +50,9 @@ struct StyleDistillSheet: View {
         CompatNavigationView {
             Form {
                 if vm.phase == .idle || vm.isFailed {
+                    if let resume = cachedResume {
+                        resumeSection(resume)
+                    }
                     sourceSection
                     if vm.isFailed {
                         Section {
@@ -70,9 +75,45 @@ struct StyleDistillSheet: View {
                     }
                 }
             }
+            .onAppear {
+                if cachedResume == nil { cachedResume = StyleDistillCache.load() }
+            }
         }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .utf8PlainText]) { result in
             if case .success(let url) = result { loadFile(url) }
+        }
+    }
+
+    // MARK: 恢复上次会话
+
+    private func resumeSection(_ resume: StyleDistillCache.Payload) -> some View {
+        Section("检测到上次未完成的蒸馏") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("来源：\(resume.sourceNote.isEmpty ? "（未填写）" : resume.sourceNote)")
+                    .font(.subheadline)
+                Text("样本 \(resume.sourceText.count) 字 · 机制分析已完成，可直接从风格卡阶段继续")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button {
+                        guard let provider = store.defaultProvider else { return }
+                        vm.run(sourceText: resume.sourceText,
+                               sourceNote: resume.sourceNote,
+                               provider: provider,
+                               cachedAnalysisRaw: resume.analysisRaw)
+                        cachedResume = nil
+                    } label: {
+                        Label("恢复蒸馏", systemImage: "arrow.clockwise.circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button(role: .destructive) {
+                        StyleDistillCache.remove()
+                        cachedResume = nil
+                    } label: {
+                        Text("放弃")
+                    }
+                }
+            }
         }
     }
 

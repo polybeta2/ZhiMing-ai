@@ -12,6 +12,8 @@ public enum StyleDistillPhase: Equatable {
 public enum StyleDistillEvent {
     case phase(StyleDistillPhase)
     case stream(StreamEvent)          // 透传 LLM 流式事件供进度可视化
+    /// S2 原始输出上抛（会话缓存用：VM 收到后落盘，失败/中断可恢复）
+    case analysisReady(String)
     case completed(StyleProfile)
 }
 
@@ -149,7 +151,8 @@ public final class StyleDistillationService {
     }
 
     public func events(sourceText: String, sourceNote: String,
-                       analyzeSystem: String, cardSystem: String, fixSystem: String) -> AsyncThrowingStream<StyleDistillEvent, Error> {
+                       analyzeSystem: String, cardSystem: String, fixSystem: String,
+                       cachedAnalysisRaw: String? = nil) -> AsyncThrowingStream<StyleDistillEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -164,16 +167,22 @@ public final class StyleDistillationService {
                                                sampleCharCount: sourceText.count)
                     profile.localMetrics = metrics
 
-                    // S2 机制分析
-                    continuation.yield(.phase(.analyzing))
-                    let analysisRaw = try await complete(messages(analyzeSystem, analysisUser(samples, metrics)))
-                    guard let analysis = LLMJSONParser.decode(StyleAnalysisDraft.self, fromJSONObjectIn: analysisRaw) else {
-                        throw StyleDistillError.parseFailed("机制分析")
+                    // S2 机制分析：命中可用缓存则跳过 LLM 调用（中断/失败恢复路径）
+                    if let analysis = cachedAnalysisRaw.flatMap({ LLMJSONParser.decode(StyleAnalysisDraft.self, fromJSONObjectIn: $0) }) {
+                        analysis.apply(to: profile)
+                        continuation.yield(.phase(.buildingCard))
+                    } else {
+                        continuation.yield(.phase(.analyzing))
+                        let analysisRaw = try await complete(messages(analyzeSystem, analysisUser(samples, metrics)))
+                        guard let analysis = LLMJSONParser.decode(StyleAnalysisDraft.self, fromJSONObjectIn: analysisRaw) else {
+                            throw StyleDistillError.parseFailed("机制分析")
+                        }
+                        analysis.apply(to: profile)
+                        continuation.yield(.analysisReady(analysisRaw))
+                        continuation.yield(.phase(.buildingCard))
                     }
-                    analysis.apply(to: profile)
 
                     // S3 风格卡与示例
-                    continuation.yield(.phase(.buildingCard))
                     let cardRaw = try await complete(messages(cardSystem, cardUser(profile)))
                     guard let card = LLMJSONParser.decode(StyleCardDraft.self, fromJSONObjectIn: cardRaw) else {
                         throw StyleDistillError.parseFailed("风格卡")

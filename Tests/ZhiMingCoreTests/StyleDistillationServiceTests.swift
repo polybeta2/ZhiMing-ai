@@ -46,18 +46,21 @@ final class StyleDistillationServiceTests: XCTestCase {
         let client = MockLLMClient(responses: [analysisJSON, cardJSON])
         let service = StyleDistillationService(client: client, config: GenerationConfig(temperature: 0.3, maxTokens: 4096))
         var phases: [StyleDistillPhase] = []
+        var analysisRawObserved: String?
         var profile: StyleProfile?
 
         for try await event in service.events(sourceText: sourceText, sourceNote: "《测试样本》",
                                               analyzeSystem: "分析", cardSystem: "汇总", fixSystem: "修正") {
             switch event {
             case .phase(let p): phases.append(p)
+            case .analysisReady(let raw): analysisRawObserved = raw
             case .stream: break
             case .completed(let p): profile = p
             }
         }
 
         XCTAssertEqual(phases, [.measuring, .analyzing, .buildingCard, .checking])
+        XCTAssertEqual(analysisRawObserved, analysisJSON, "S2 原始输出经 analysisReady 事件上抛（供会话缓存）")
         let result = try XCTUnwrap(profile)
         XCTAssertEqual(result.name, "冷雨短句")
         XCTAssertEqual(result.tags, ["冷峻", "白描", "都市夜色"])
@@ -111,6 +114,52 @@ final class StyleDistillationServiceTests: XCTestCase {
         let result = try XCTUnwrap(profile)
         XCTAssertTrue(result.examples.isEmpty)
         XCTAssertEqual(result.confidence, "low")
+    }
+
+    func testResumeWithCachedAnalysisSkipsAnalyzeCall() async throws {
+        // 命中缓存：跳过 S2 机制分析，只调一次 LLM（S3 风格卡），阶段序列不含 .analyzing
+        let client = MockLLMClient(responses: [cardJSON])
+        let service = StyleDistillationService(client: client, config: GenerationConfig(temperature: 0.3, maxTokens: 4096))
+        var phases: [StyleDistillPhase] = []
+        var profile: StyleProfile?
+
+        for try await event in service.events(sourceText: sourceText, sourceNote: "《测试样本》",
+                                              analyzeSystem: "分析", cardSystem: "汇总", fixSystem: "修正",
+                                              cachedAnalysisRaw: analysisJSON) {
+            switch event {
+            case .phase(let p): phases.append(p)
+            case .stream, .analysisReady: break
+            case .completed(let p): profile = p
+            }
+        }
+
+        XCTAssertEqual(phases, [.measuring, .buildingCard, .checking])
+        XCTAssertEqual(client.requestCount, 1)
+        let result = try XCTUnwrap(profile)
+        XCTAssertEqual(result.narrativeVoice.temperature, "冷峻克制", "档案字段来自缓存的 S2 结果")
+        XCTAssertEqual(result.name, "冷雨短句")
+    }
+
+    func testInvalidCachedAnalysisFallsBackToFreshCall() async throws {
+        // 缓存内容解析不了 → 静默丢弃缓存，回退到正常两次调用
+        let client = MockLLMClient(responses: [analysisJSON, cardJSON])
+        let service = StyleDistillationService(client: client, config: GenerationConfig(temperature: 0.3, maxTokens: 4096))
+        var phases: [StyleDistillPhase] = []
+        var profile: StyleProfile?
+
+        for try await event in service.events(sourceText: sourceText, sourceNote: "x",
+                                              analyzeSystem: "分析", cardSystem: "汇总", fixSystem: "修正",
+                                              cachedAnalysisRaw: "这不是JSON") {
+            switch event {
+            case .phase(let p): phases.append(p)
+            case .stream, .analysisReady: break
+            case .completed(let p): profile = p
+            }
+        }
+
+        XCTAssertEqual(phases, [.measuring, .analyzing, .buildingCard, .checking])
+        XCTAssertEqual(client.requestCount, 2)
+        XCTAssertEqual(profile?.name, "冷雨短句")
     }
 
     func testParseFailureThrows() async {
