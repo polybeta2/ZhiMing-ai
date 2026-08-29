@@ -28,6 +28,18 @@ public enum PromptLimits {
     public static let foreshadowReminderCap = 2_000
     /// 伏笔字段（标题/详情/备注/计划回收）保存时截断线
     public static let foreshadowTextFieldCap = 2_000
+    /// 文风档案 writing 注入上限（风格卡+规则+分层要点，超预算按优先级装填）
+    public static let styleProfileCap = 4_000
+    /// 文风档案 outline 注入上限（仅视角/节奏/对白概要）
+    public static let styleProfileOutlineCap = 1_500
+    /// 文风档案去AI味专项注入上限
+    public static let styleProfileAntiAICap = 2_000
+    /// 文风档案 eval 注入上限（P2 风格体检预留）
+    public static let styleProfileEvalCap = 5_000
+    /// 蒸馏单次采样输入上限（首/中/尾合计）
+    public static let styleSampleCap = 24_000
+    /// 证据片段长度上限（只存机制不存原文护栏）
+    public static let styleEvidenceCap = 80
 }
 
 // MARK: - 示例标签数据模型（一句话立项增强）
@@ -90,6 +102,9 @@ public enum PromptID {
     public static let chapterBatchOutline = "prompt.chapter.batch.outline.system"
     public static let r18zh = "prompt.r18.system.zh"
     public static let r18en = "prompt.r18.system.en"
+    public static let styleDistillAnalyze = "prompt.style.distill.analyze.system"
+    public static let styleDistillCard = "prompt.style.distill.card.system"
+    public static let styleDistillFix = "prompt.style.distill.fix.system"
 }
 
 // MARK: - 提示词与标签库（全局单例）
@@ -207,7 +222,7 @@ public final class PromptLibrary: ObservableObject {
     public static func render(_ template: String, values: [String: String]) -> String {
         var out = template
         // 先收集模板里实际出现的占位符键，避免遗漏清理
-        let known = ["mode", "title", "synopsis", "styleGuide"]
+        let known = ["mode", "title", "synopsis", "styleGuide", "styleSample", "styleMetrics"]
         for key in known {
             let token = "{\(key)}"
             guard out.contains(token) else { continue }
@@ -752,6 +767,72 @@ public final class PromptLibrary: ObservableObject {
                 6. Consent premise: mutual willingness is the precondition of any scene; hesitation or refusal signals must be respected by the other character;
                 7. Scene movement: scenes may escalate, pause, redirect, fail, or remain unresolved without compulsory symmetry or climax; land the emotional aftermath and the relationship shift afterwards.
                 For fictional use only; output remains subject to the configured model's capabilities.
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.styleDistillAnalyze,
+                name: "文风蒸馏 · 机制分析",
+                category: "文风",
+                placeholders: [],
+                defaultText: """
+                你是资深文学编辑，负责从小说样本中蒸馏「文风机制档案」。只分析语言层怎么写，绝不分析写了什么：
+                情节、人物、设定、世界观、主题属于内容层，蒸馏时必须排除，不得写入任何字段。
+
+                样本附带的【计量数据】（句长/标点/对话占比）是客观锚点：相关结论必须与之一致，不得空泛。
+
+                严格输出 JSON（不要输出其他内容）：
+                {
+                  "narrative_voice": {"pov": "叙事视角与人称", "distance": "叙事距离（贴身/中距/俯瞰）", "temperature": "语气温度（冷峻/温情/反讽等）", "interiority": "内心戏深度与呈现方式", "camera_habits": ["镜头习惯，2-4条"]},
+                  "sentence_syntax": {"shape": "主导句型", "long_short_ratio": "长短句比例与切换规律", "punctuation_rhythm": "标点节奏", "paragraph_cadence": "段落节奏", "signature_moves": ["招牌句式，2-4条"]},
+                  "diction": {"register": "语域（口语/书面/文白）", "lexical_fields": ["高频词汇场，3-6个"], "verb_habits": ["动词习惯，2-4条"], "image_systems": ["意象系统，2-4条"], "sensory_weights": "五感权重与切换", "banned_moves": ["该文风避开的套话，2-4条"]},
+                  "scene_rhythm": {"openings": "场景开场习惯", "closings": "场景收束习惯", "act_inner_env_ratio": "动作/内心/环境大致比例", "transitions": "转场习惯"},
+                  "dialogue": {"line_length": "对白句长与密度", "subtext_level": "潜台词浓度（直说/暗示/沉默）", "tag_habits": "说话标签与动作节拍", "silence_and_gesture": "沉默与肢体语言的使用"},
+                  "emotion": {"directness": "情绪直陈还是移置", "preferred_carriers": ["情绪载体：动作/物件/天气/身体/沉默/对白"], "intensity_curve": "情绪强度曲线", "avoid_moves": ["会显得做作的情绪写法"]},
+                  "anti_ai": {"forbidden_patterns": ["该文风下会立刻露馅的AI腔模式，3-6条"], "revision_checks": ["写后可自查清单，3-5条"]},
+                  "evidence": [{"trait": "对应某一层的具体观察", "snippet": "支撑观察的原文短片段，不超过40字", "confidence": "high/medium/low"}]
+                }
+
+                铁律：
+                1. 每条结论必须具体、可操作、可执行（可量化处对齐【计量数据】），禁止「文笔优美、节奏流畅」式空话；
+                2. snippet 只能是极短引用（≤40字）且服务于机制观察；禁止整句成段摘抄；snippet 优先选不含专名的句子；
+                3. 内容层排除铁律：样本的情节、人物名、地名、专有设定不得出现在除 snippet 外的任何字段；
+                4. 样本不足以支撑的层，宁留空数组/空串并降低 confidence，不得编造。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.styleDistillCard,
+                name: "文风蒸馏 · 风格卡汇总",
+                category: "文风",
+                placeholders: [],
+                defaultText: """
+                你是资深文学编辑。「文风机制分析」已完成（见【机制分析】），请汇总为可执行的「风格卡」，严格输出 JSON（不要输出其他内容）：
+                {
+                  "name": "给这份文风起的名字（4-10字，如「冷峻白描」）",
+                  "tags": ["核心风格标签，5-8个"],
+                  "fingerprint_summary": "风格指纹小结，不超过300字，高度凝练",
+                  "must_rules": ["必遵规则：可量化、可自检，共10-15条，每条不超过40字"],
+                  "avoid_rules": ["反面清单：写作时绝对禁止的行为，共5-8条"],
+                  "examples": [{"plain": "一句中性的普通表达", "styled": "按该文风改写的同一句", "principle": "体现的机制"}]
+                }
+
+                铁律：
+                1. must_rules 必须能逐条对照执行（含具体比例/长度/做法），与【机制分析】一致，不得另起炉灶；
+                2. examples 的 styled 必须是全新改写示范，禁止照抄样本原文的任何连续片段；plain 用不含文风特征的普通句子；
+                3. examples 共 3-5 条，至少覆盖叙述、对白、情绪各一条；
+                4. name/tags/fingerprint_summary 不得出现作品名、人物名与情节内容。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.styleDistillFix,
+                name: "文风蒸馏 · 查重修正",
+                category: "文风",
+                placeholders: [],
+                defaultText: """
+                你是资深文学编辑。以下改写示范经查重与原样本存在连续 8 字以上重合，必须重写：
+                - 保留原句的文风机制与句式特点，但换成全新的用词、意象与语序；
+                - 严格输出 JSON 数组（不要输出其他内容）：
+                [{"index": 0, "styled": "重写后的示范句", "principle": "体现的机制"}]
+                - index 与【违规示范】列表一一对应，逐条都要给出。
                 """
             ),
         ]
