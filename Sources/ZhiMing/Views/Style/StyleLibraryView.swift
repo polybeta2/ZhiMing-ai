@@ -33,6 +33,7 @@ struct DeleteConfirmSheet: View {
 struct StyleLibraryView: View {
     @EnvironmentObject private var store: AppStore
     @State private var showDistill = false
+    @State private var showFusion = false
     @State private var deletingProfile: StyleProfile?
 
     var body: some View {
@@ -78,14 +79,24 @@ struct StyleLibraryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showDistill = true
-                } label: {
-                    Image(systemName: "plus")
+                HStack(spacing: AppTheme.spacing[2]) {
+                    if store.styleProfiles.count >= 2 {
+                        Button {
+                            showFusion = true
+                        } label: {
+                            Image(systemName: "arrow.triangle.merge")
+                        }
+                    }
+                    Button {
+                        showDistill = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
                 }
             }
         }
         .sheet(isPresented: $showDistill) { StyleDistillSheet() }
+        .sheet(isPresented: $showFusion) { StyleFusionSheet() }
         .sheet(item: $deletingProfile) { profile in
             DeleteConfirmSheet(
                 title: "删除「\(profile.name)」？",
