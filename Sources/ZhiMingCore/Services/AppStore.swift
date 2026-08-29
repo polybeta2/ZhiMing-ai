@@ -10,6 +10,8 @@ import Combine
 public final class AppStore: ObservableObject {
     @Published public var novels: [Novel] = []
     @Published public var providers: [ProviderConfig] = []
+    /// 文风档案库（全局，跨书复用）
+    @Published public var styleProfiles: [StyleProfile] = []
     /// 每次保存自增，驱动观察 store 的视图刷新（嵌套模型变更的兜底通知）
     @Published public private(set) var revision = 0
     /// 最近一次保存失败的提示（nil = 正常）；由根界面以 alert 呈现，不再静默丢数据
@@ -20,6 +22,7 @@ public final class AppStore: ObservableObject {
     private struct Document: Codable {
         var novels: [Novel]
         var providers: [ProviderConfig]
+        var styleProfiles: [StyleProfile]?
     }
 
     /// 测试注入：重定向数据目录（Linux XCTest 指向临时目录，避免读写真实用户数据）
@@ -51,6 +54,7 @@ public final class AppStore: ObservableObject {
         if let doc = decodeDocument(at: fileURL) ?? decodeDocument(at: backupURL) {
             store.novels = doc.novels
             store.providers = doc.providers
+            store.styleProfiles = doc.styleProfiles ?? []
             return store
         }
 
@@ -88,7 +92,7 @@ public final class AppStore: ObservableObject {
     /// 原子保存；所有写操作完成后调用。失败不再静默：写入 lastSaveError 供界面提示。
     public func save() {
         revision += 1
-        let doc = Document(novels: novels, providers: providers)
+        let doc = Document(novels: novels, providers: providers, styleProfiles: styleProfiles)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(doc) else {
@@ -139,6 +143,32 @@ public final class AppStore: ObservableObject {
     public func makeDefault(_ provider: ProviderConfig) {
         for p in providers { p.isDefault = (p.id == provider.id) }
         save()
+    }
+
+    // MARK: - 文风档案库
+
+    public func upsertStyleProfile(_ profile: StyleProfile) {
+        profile.updatedAt = .now
+        if let index = styleProfiles.firstIndex(where: { $0.id == profile.id }) {
+            styleProfiles[index] = profile
+        } else {
+            styleProfiles.append(profile)
+        }
+        save()
+    }
+
+    public func deleteStyleProfile(_ profile: StyleProfile) {
+        styleProfiles.removeAll { $0.id == profile.id }
+        // 解绑所有引用该书档案的作品，避免悬挂 UUID
+        for novel in novels where novel.activeStyleProfileID == profile.id {
+            novel.activeStyleProfileID = nil
+        }
+        save()
+    }
+
+    /// 档案被多少本书绑定（删除前提示用）
+    public func bindingCount(of profile: StyleProfile) -> Int {
+        novels.filter { $0.activeStyleProfileID == profile.id }.count
     }
 }
 
