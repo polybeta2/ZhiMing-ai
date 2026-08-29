@@ -142,6 +142,14 @@ private struct VolumeOutlineSection: View {
                     )
                 }
             }
+
+            // 批量细纲：一键生成本卷尚未写细纲的章节（每次最多 5 章，直接写回）
+            let batchPending = volume.chapters.filter {
+                ($0.detailedOutline ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            if !batchPending.isEmpty {
+                batchControls(pending: Array(batchPending.prefix(5)), left: batchPending.count)
+            }
         } header: {
             // 卷菜单只挂在标题上：行级与区块级菜单共存时 iOS 15 会错配（长按章节弹卷菜单）
             Text(volume.name)
@@ -200,6 +208,58 @@ private struct VolumeOutlineSection: View {
                 store.save()
             }
         }
+    }
+
+    // MARK: - 批量细纲（本卷）
+
+    @ViewBuilder private func batchControls(pending: [Chapter], left: Int) -> some View {
+        VStack(alignment: .leading, spacing: AppTheme.spacing[1]) {
+            if vm.batchPhase == .streaming {
+                HStack(spacing: AppTheme.spacing[1]) {
+                    Button("停止", role: .destructive) { vm.stopBatch() }
+                        .font(.footnote)
+                    StreamingStatusView(tracker: vm.progress)
+                }
+            } else {
+                HStack(spacing: AppTheme.spacing[1]) {
+                    Button {
+                        startBatch(pending)
+                    } label: {
+                        Label("批量生成细纲（剩余 \(left) 章，每次最多 5 章）",
+                              systemImage: "text.badge.plus")
+                            .font(.footnote)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(vm.batchPhase == .streaming)
+                    if vm.batchSummary != nil {
+                        Button("重新生成") { startBatch(pending) }
+                            .font(.footnote)
+                    }
+                }
+            }
+            if let summary = vm.batchSummary {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                    Text(summary).font(.caption).foregroundColor(.secondary)
+                }
+            }
+            if let error = vm.errorMessage {
+                Label(error, systemImage: "xmark.octagon.fill")
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        }
+        .padding(.top, AppTheme.spacing[1])
+    }
+
+    private func startBatch(_ chapters: [Chapter]) {
+        guard let provider = activeProvider else {
+            showNoProviderAlert = true
+            return
+        }
+        guard let novel = volume.novel else { return }
+        vm.startBatchChapters(chapters: chapters.prefix(5).map { $0 }, volume: volume,
+                              novel: novel, provider: provider, instruction: nil, store: store)
     }
 
     // MARK: - AI 卷纲生成

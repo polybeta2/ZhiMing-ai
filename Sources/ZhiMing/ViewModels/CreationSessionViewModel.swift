@@ -212,7 +212,7 @@ struct CreationSessionState: Codable {
 final class CreationSessionViewModel: ObservableObject {
     /// String 原始值用于 SQLite 快照恢复（phase 持久化）
     enum Phase: String, Codable, Equatable { case collecting, proposing, blueprintReady, outlining, confirmed }
-    enum StreamKind { case clarify, structure, foundation, revise, volumeBatch, chapterBatch }
+    enum StreamKind { case clarify, structure, foundation, revise, volumeBatch, chapterBatch, chapterNames }
 
     @Published private(set) var phase: Phase = .collecting
     @Published private(set) var isStreaming = false
@@ -492,6 +492,52 @@ final class CreationSessionViewModel: ObservableObject {
             to: PromptTemplates.creationChapterBatch(context: context, targets: targets, supplement: supplement)
         )
         beginStream(kind: .chapterBatch, messages: messages, provider: provider)
+    }
+
+    // MARK: 章节标题批次（长篇小说蓝图补全）
+
+    /// 为指定卷生成全部章节标题（仅当该卷 chapters 全无标题时可用，见 isEmptyVolumeTitles）
+    func generateChapterNames(volumeIndex: Int) {
+        guard let provider, !isStreaming, let blueprint else { return }
+        guard blueprint.volumes.indices.contains(volumeIndex) else { return }
+        let volume = blueprint.volumes[volumeIndex]
+        guard isEmptyVolumeTitles(volume) else { return }
+        let context = chapterNamesContext(volumeName: volume.name ?? "第\(volumeIndex + 1)卷",
+                                          count: volume.chapters.count)
+        let messages = PromptTemplates.applying(
+            providerExtra: provider.systemPromptExtra,
+            to: PromptTemplates.creationChapterNames(context: context, supplement: supplement)
+        )
+        chapterNameTargetIndex = volumeIndex
+        beginStream(kind: .chapterNames, messages: messages, provider: provider)
+    }
+
+    /// 该卷是否缺少全部标题（生成标题按钮的显隐依据）
+    func isEmptyVolumeTitles(_ volume: BlueprintVolume) -> Bool {
+        let titles = volume.chapters.compactMap { $0.title?.trimmingCharacters(in: .whitespaces) }
+        return titles.allSatisfy { $0.isEmpty } && !volume.chapters.isEmpty
+    }
+
+    /// 本轮章节标题的目标卷（settle 写回用）
+    private var chapterNameTargetIndex = -1
+
+    private func chapterNamesContext(volumeName: String, count: Int) -> String {
+        guard let blueprint else { return "" }
+        var lines: [String] = []
+        if let title = blueprint.title_suggestion, !title.isEmpty { lines.append("【书名】\(title)") }
+        if let synopsis = blueprint.synopsis, !synopsis.isEmpty { lines.append("【梗概】\(synopsis)") }
+        if let style = blueprint.style_guide, !style.isEmpty { lines.append("【文风约束】\(style)") }
+        let characters = blueprint.characters
+            .compactMap { card -> String? in
+                guard let name = card.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return nil }
+                return "\(name)（\(card.role ?? "角色")）"
+            }
+        if !characters.isEmpty { lines.append("【角色】\(characters.joined(separator: "、"))") }
+        if let concept = proposal?.concept, !concept.isEmpty {
+            lines.append("【已确认的故事思路】\n\(String(concept.prefix(PromptLimits.requiredFieldCap)))")
+        }
+        lines.append("【目标卷】\(volumeName)（本章数：\(count)）")
+        return lines.joined(separator: "\n\n")
     }
 
     func stop() {
@@ -795,7 +841,7 @@ final class CreationSessionViewModel: ObservableObject {
 
     /// 解析失败时界面是否需要展示原始输出
     private func kindNeedsRaw(_ kind: StreamKind) -> Bool {
-        kind != .chapterBatch && kind != .volumeBatch && kind != .clarify
+        kind != .chapterBatch && kind != .chapterNames && kind != .volumeBatch && kind != .clarify
     }
 
     /// 流正常结束：解析并驱动阶段转换，返回给界面的助手消息（nil 不追加）
@@ -867,6 +913,30 @@ final class CreationSessionViewModel: ObservableObject {
                 }
             }
             return message
+        case .chapterNames:
+            // 章节标题批次：写回目标卷的 chapters title（保持空细纲待生成状态）
+            guard let batch = LLMJSONParser.decode([BlueprintChapter].self, fromJSONObjectIn: raw),
+                  blueprint != nil else {
+                errorMessage = "章节标题解析失败，可重新生成"
+                return nil
+            }
+            var bp = blueprint!
+            let vIndex = chapterNameTargetIndex
+            guard bp.volumes.indices.contains(vIndex) else { return "章节标题已生成完毕" }
+            let titles = batch.compactMap { $0.title?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            guard !titles.isEmpty else {
+                errorMessage = "解析到空章节标题，可重新生成"
+                return nil
+            }
+            // 标题数不足时按顺序补充到本章数；多余截断
+            for i in bp.volumes[vIndex].chapters.indices {
+                if i < titles.count {
+                    bp.volumes[vIndex].chapters[i].title = titles[i]
+                }
+            }
+            blueprint = bp
+            refreshOutlineProgress()
+            return "已生成《\(bp.volumes[vIndex].name ?? "本卷")》\(min(titles.count, bp.volumes[vIndex].chapters.count)) 个章节标题，可开始分批生成细纲。"
         case .chapterBatch:
             guard let batch = LLMJSONParser.decode([BlueprintChapter].self, fromJSONObjectIn: raw) else {
                 errorMessage = "细纲批次解析失败，可重新生成本批"

@@ -23,6 +23,18 @@ final class OutlineAssistViewModel: ObservableObject {
     /// 最近一次请求参数，供「重新生成」复用
     private var lastRequest: (kind: OutlineTarget, instruction: String?)?
 
+    // MARK: 批量细纲（大纲页「批量生成本卷细纲」）
+
+    enum BatchPhase: Equatable { case idle, streaming, done }
+    @Published private(set) var batchPhase: BatchPhase = .idle
+    @Published private(set) var batchSummary: String?
+    private var batchTask: Task<Void, Never>?
+    /// 本次批量目标章节（写回用）
+    private var batchTargets: [Chapter] = []
+    private weak var batchStore: AppStore?
+    /// 批量重试参数
+    private var lastBatchRequest: (chapters: [Chapter], volume: Volume?, novel: Novel, instruction: String?)?
+
     func start(kind: OutlineTarget, novel: Novel, provider: ProviderConfig, instruction: String?) {
         guard phase != .streaming else { return }
         lastRequest = (kind, instruction)
@@ -122,6 +134,176 @@ final class OutlineAssistViewModel: ObservableObject {
     func regenerate(novel: Novel, provider: ProviderConfig) {
         guard let request = lastRequest else { return }
         start(kind: request.kind, novel: novel, provider: provider, instruction: request.instruction)
+    }
+
+    /// 批量生成本卷未写细纲的章节（一次至多 5 章，超出请分批点击）。
+    /// 与单章草稿模式不同：这是「直接落盘」——多章结果一次性写回 detailedOutline，
+    /// 完成后给出 summary，由界面提示；中途停止/失败会保留已解析部分。
+    func startBatchChapters(chapters: [Chapter], volume: Volume?, novel: Novel,
+                            provider: ProviderConfig, instruction: String?,
+                            store: AppStore) {
+        guard batchPhase != .streaming, !chapters.isEmpty else { return }
+        lastBatchRequest = (chapters, volume, novel, instruction)
+        batchTargets = chapters
+        batchStore = store
+        batchSummary = nil
+        errorMessage = nil
+
+        guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
+              let baseUrl = URL(string: provider.baseUrl) else {
+            errorMessage = "未配置有效的模型接口或 API Key"
+            return
+        }
+
+        // R18 语言检测样本：优先附加要求，其次卷纲/梗概
+        let sample = instruction ?? volume?.outline ?? novel.synopsis
+        let r18Text: String? = novel.r18Enabled
+            ? PromptLibrary.shared.r18Supplement(forInput: sample)
+            : nil
+
+        let budget = PromptTemplates.adjustedInputBudget(
+            base: provider.contextBudgetChars,
+            injections: r18Text, provider.systemPromptExtra)
+
+        var system = PromptLibrary.shared.resolvedText(for: PromptID.chapterBatchOutline)
+        if let r18 = r18Text, !r18.isEmpty { system += "\n\n" + r18 }
+        if let extra = provider.systemPromptExtra, !extra.isEmpty { system += "\n\n" + extra }
+
+        let user = batchUserPrompt(chapters: chapters, volume: volume, novel: novel,
+                                   budgetChars: budget, instruction: instruction)
+        let messages = [LLMMessage(role: .system, content: system),
+                        LLMMessage(role: .user, content: user)]
+
+        let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
+        let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
+
+        let totalChars = messages.totalContentChars
+        Task { @MainActor in
+            guard await PromptGuard.authorized(totalChars: totalChars) else { return }
+            self.batchPhase = .streaming
+            KeepAwake.set(true)
+            self.progress.begin()
+            self.beginBatchStreaming(messages: messages, client: client, config: config)
+        }
+    }
+
+    func regenerateBatch(provider: ProviderConfig) {
+        guard let r = lastBatchRequest, let store = batchStore else { return }
+        startBatchChapters(chapters: r.chapters, volume: r.volume, novel: r.novel,
+                           provider: provider, instruction: r.instruction, store: store)
+    }
+
+    func stopBatch() {
+        batchTask?.cancel()
+        batchPhase = .idle
+        progress.finish()
+        KeepAwake.set(false)
+    }
+
+    /// 批量请求的用户侧上下文：梗概/风格/卷纲/章节清单/已完成细纲/后续章节
+    private func batchUserPrompt(chapters: [Chapter], volume: Volume?, novel: Novel,
+                                 budgetChars: Int, instruction: String?) -> String {
+        var lines: [String] = []
+        if !novel.synopsis.isEmpty {
+            lines.append("【作品梗概】\n\(String(novel.synopsis.prefix(budgetChars / 3)))")
+        }
+        if let style = novel.styleGuide, !style.isEmpty {
+            lines.append("【风格约束】\n\(style)")
+        }
+        if let volume, let outline = volume.outline, !outline.isEmpty {
+            lines.append("【\(volume.name)·卷纲】\n\(outline)")
+        }
+
+        // 本卷章节清单：标出本批与已完成
+        let batchTitles = Set(chapters.map { $0.title })
+        let all = volume?.chapters ?? []
+        let catalog = all.map { ch -> String in
+            let done = ch.detailedOutline?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            var mark = done ? "（已完成）" : "（待生成）"
+            if batchTitles.contains(ch.title) { mark = "▶（本批）" }
+            return "- \(ch.title) \(mark)\(done ? "：\(ch.detailedOutline!.prefix(40))" : "")"
+        }
+        if !catalog.isEmpty {
+            lines.append("【本卷章节清单】\n" + catalog.joined(separator: "\n"))
+        }
+
+        // 已完成细纲（承接）
+        let rendered = (volume?.chapters ?? []).filter {
+            !($0.detailedOutline ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if !rendered.isEmpty {
+            lines.append("【已完成细纲】\n" + rendered.map { "\($0.title)：\($0.detailedOutline!)" }.joined(separator: "\n"))
+        }
+
+        // 后续章节（衔接/防提前剧透）
+        var titles: [String] = []
+        var seen = false
+        for ch in all {
+            if batchTitles.contains(ch.title) { seen = true; continue }
+            if seen { titles.append(ch.title) }
+        }
+        if !titles.isEmpty {
+            lines.append("【后续章节】\n" + titles.joined(separator: "\n"))
+        }
+
+        let list = chapters.enumerated().map { "\($0.offset + 1). \($0.element.title)" }.joined(separator: "\n")
+        lines.append("【本批待生成章节】\n\(list)")
+        if let extra = instruction?.trimmingCharacters(in: .whitespacesAndNewlines), !extra.isEmpty {
+            lines.append("【附加要求】\n\(extra)")
+        }
+        return lines.joined(separator: "\n\n")
+    }
+
+    private func beginBatchStreaming(messages: [LLMMessage],
+                                     client: OpenAICompatibleClient,
+                                     config: GenerationConfig) {
+        batchTask = Task {
+            var raw = ""
+            do {
+                for try await event in client.streamChat(messages: messages, config: config) {
+                    progress.handle(event)
+                    if case .content(let delta) = event { raw += delta }
+                }
+                self.settleBatch(raw: raw, cancelled: false)
+            } catch is CancellationError {
+                self.settleBatch(raw: raw, cancelled: true)
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.settleBatch(raw: raw, cancelled: true)
+            }
+            self.progress.finish()
+            self.batchPhase = .idle
+            KeepAwake.set(false)
+        }
+    }
+
+    /// 解析批量 JSON 数组并写回对应章节；返回成功写回数
+    @discardableResult
+    private func settleBatch(raw: String, cancelled: Bool) -> Int {
+        guard let arr = LLMJSONParser.decode([BlueprintChapter].self, fromJSONObjectIn: raw) else {
+            if !cancelled { errorMessage = "批量细纲解析失败，可点击「重新生成」重试" }
+            batchSummary = nil
+            return 0
+        }
+        guard let store = batchStore else { return 0 }
+        var applied = 0
+        for item in arr {
+            let title = item.title?.trimmingCharacters(in: .whitespaces) ?? ""
+            guard let chapter = batchTargets.first(where: { $0.title == title }) else { continue }
+            let outline = item.detailed_outline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !outline.isEmpty else { continue }
+            chapter.detailedOutline = outline
+            let cards = (item.scene_cards ?? []).map {
+                SceneCard(goal: $0.goal ?? "", obstacle: $0.obstacle ?? "", hook: $0.hook ?? "")
+            }.filter { !$0.isEmpty }
+            if !cards.isEmpty { chapter.sceneCards = cards }
+            applied += 1
+        }
+        batchSummary = applied > 0
+            ? "已生成 \(applied)/\(batchTargets.count) 章细纲" + (cancelled ? "（已停止，保留部分结果）" : "")
+            : nil
+        store.save()
+        return applied
     }
 
     func stop() { streamTask?.cancel() }

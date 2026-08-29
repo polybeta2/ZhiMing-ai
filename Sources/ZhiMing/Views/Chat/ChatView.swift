@@ -64,6 +64,26 @@ struct ChatView: View {
                         .padding(.top, AppTheme.spacing[1])
                         .background(.bar)
                 }
+                if !isCreation {
+                    // 写作助手权限：显式分段开关，比 toolbar 里的锁菜单更易发现与调整
+                    HStack(spacing: AppTheme.spacing[2]) {
+                        Text("可编辑设定")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("写作助手权限", selection: Binding(
+                            get: { accessMode },
+                            set: { accessModeRaw = $0.rawValue }
+                        )) {
+                            Text("只读").tag(AssistantAccessMode.readOnly)
+                            Text("读写").tag(AssistantAccessMode.readWrite)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 220)
+                    }
+                    .padding(.horizontal, AppTheme.spacing[3])
+                    .padding(.vertical, AppTheme.spacing[1])
+                    .background(.bar)
+                }
                 ChatInputBar(
                     text: $input,
                     isStreaming: anyStreaming,
@@ -668,9 +688,10 @@ private struct OutlineBatchControls: View {
                         Text("1 章").tag(1)
                         Text("2 章").tag(2)
                         Text("3 章").tag(3)
+                        Text("4 章").tag(4)
+                        Text("5 章").tag(5)
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 150)
                     Toggle("自动连续", isOn: $vm.autoContinue)
                         .font(.footnote)
                 }

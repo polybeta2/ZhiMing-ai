@@ -18,8 +18,9 @@ enum PromptLimits {
     static let requiredFieldCap = 4_000
     /// 写作助手聊天历史的单条消息截断线
     static let historyMessageCap = 2_000
-    /// 发送前总字符告警线：超过则弹确认框（PromptGuard）
-    static let requestWarnChars = 80_000
+    /// 发送前总字符告警线：超过则弹确认框（PromptGuard）。现代模型普遍 200K~1M 上下文，
+    /// v2.2.0 由 80K 放宽到 200K，仅在真正逼近上下文上限时才打扰用户。
+    static let requestWarnChars = 200_000
     /// 伏笔提醒触发阈值：埋设距今超过 N 章即提醒
     static let foreshadowReminderChapterThreshold = 8
     /// 未回收伏笔提醒整段字符上限（可选层，硬裁尾）
@@ -66,11 +67,13 @@ enum PromptID {
     static let creationVolumeBatch = "prompt.creation.volume.batch.system"
     static let creationChapterBatch = "prompt.creation.chapter.batch.system"
     static let creationRevise = "prompt.creation.revise.system"
+    static let creationChapterNames = "prompt.creation.chapter.names.system"
     static let writingAssistant = "prompt.assistant.system"
     static let assistantReadWrite = "prompt.assistant.rw.protocol"
     static let antiAIFlavor = "prompt.antiai.system"
     static let volumeOutline = "prompt.volume.outline.system"
     static let chapterOutline = "prompt.chapter.outline.system"
+    static let chapterBatchOutline = "prompt.chapter.batch.outline.system"
     static let r18zh = "prompt.r18.system.zh"
     static let r18en = "prompt.r18.system.en"
 }
@@ -558,15 +561,59 @@ final class PromptLibrary: ObservableObject {
                 defaultText: """
                 你是一位资深小说策划，正在为已确认的卷章结构分批生成章细纲。
                 用户会给出作品背景（梗概/卷纲/角色等）、已生成的细纲、本批待生成章节标题、后续章节列表与待揭晓伏笔。请只为本批章节输出细纲 JSON 数组（不要输出其他内容）：
-                [{"title": "与列表逐字一致的章节标题", "detailed_outline": "细纲（120-200字：发生什么、为什么、带来什么变化、如何衔接下一章）", "scene_cards": [{"goal": "主角这场想达成什么", "obstacle": "什么拦着", "hook": "章末勾住读者的悬念"}], "foreshadowings": [{"title": "本章埋设伏笔的一句话概括", "detail": "伏笔内容", "reveal_in": "计划揭晓的章节标题（从后续章节列表中选择）"}]}]
+                [{"title": "与列表逐字一致的章节标题", "detailed_outline": "细纲（120-200字）", "scene_cards": [{"goal": "主角这场想达成什么", "obstacle": "什么拦着", "hook": "本章结束时悬而未决的悬念"}], "foreshadowings": [{"title": "本章埋设伏笔的一句话概括", "detail": "伏笔内容", "reveal_in": "计划揭晓的章节标题（从后续章节列表中选择）"}]}]
 
                 铁律（作者意图至上）：
                 1. 章节标题必须与列表逐字一致，只生成本批章节，顺序一致，不得输出其他章节；
-                2. 作者与蓝图/卷纲明确给出的情节走向是不可改写的事实：细纲必须落实，不得替换、删减或调换顺序；承接已生成细纲的走向与已确立事实；
-                3. 细纲要衔接【后续章节】：本批结尾为后续核心事件留出接口，不把后续章节才该发生的事件提前写掉；
-                4. 若给出【需在本批揭晓的伏笔】，对应章节的细纲必须安排该伏笔的揭晓或回收，并在 scene_cards 的 hook 中点出；
-                5. 本章埋设新伏笔必须登记进 foreshadowings，reveal_in 从【后续章节】列表中选择最合适的揭晓章；本章不埋伏笔则省略该字段；
-                6. 每章 1-3 张场景卡；自由发挥仅限作者未提及的场景细节。
+                2. 作者与蓝图/卷纲明确给出的情节走向是不可改写的事实：细纲必须落实，不得替换、删减或调换顺序；
+                3. 【事件边界·最重要】：每一章的细纲严格限定在本章标题所对应事件的「发生与完成」范围内——
+                   a. 上一章已发生的事件不得在本章复述或再次完成，至多开篇用一句话交代上一章的收束状态（如「收到线索后」），不得再现其场景；
+                   b. 后续章节标题对应的事件不得在本章「发生」或「完成」，即使简写或预告式执行也不允许；本章提及下一章的相关事物只能停留在「发现线索/产生悬念/形成动机」这类未完成态；
+                   c. 细纲主体只写本章本身：发生了什么事、为什么、带来什么变化；
+                4. hook 只许写「悬而未决的悬念」（如「火漆封蜡要如何拆开」「神秘买家究竟是谁」），禁止把下一章才发生的剧情动作写进 hook；
+                5. 若给出【需在本批揭晓的伏笔】，对应章节必须安排揭晓或回收，并在 scene_cards 的 hook 中点出；
+                6. 本章埋设新伏笔必须登记进 foreshadowings，reveal_in 从【后续章节】列表中选择最合适的揭晓章；本章不埋伏笔则省略该字段；
+                7. 每章 1-3 张场景卡；自由发挥仅限作者未提及的场景细节。
+
+                反例（禁止出现）：本章「破庙避雨」的细纲写成「二人拆开密信发现真相」——拆信是下一章事件；本章应止于「发现密信、决定设法拆开」。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.chapterBatchOutline,
+                name: "细纲批量生成（大纲页）· 系统提示词",
+                category: "大纲",
+                placeholders: [],
+                defaultText: """
+                你是一位资深中文小说编辑，为指定的一批章节批量撰写「章细纲」（写作前的执行大纲）。
+                用户会给出作品梗概/风格约束/所在卷的卷纲/本卷章节清单（标注本批与已完成）、已完成细纲与后续章节标题。请只为本批章节输出细纲 JSON 数组（不要输出其他内容）：
+                [{"title": "与清单逐字一致的章节标题", "detailed_outline": "细纲（120-200字）", "scene_cards": [{"goal": "主角这场想达成什么", "obstacle": "什么拦着", "hook": "本章结束时悬而未决的悬念"}]}]
+
+                铁律：
+                1. 章节标题必须与清单逐字一致，只生成本批章节，顺序一致，不得输出其他章节；
+                2. 承接本卷卷纲与已完成细纲的走向，不推翻已确立事实；
+                3. 【事件边界·最重要】：每章细纲严格限定在本章标题对应事件的「发生与完成」范围内——
+                   a. 已完成章节的事件不得复述或再次完成，至多一句交代承接状态；
+                   b. 后续章节标题对应的事件不得在本章发生或完成，至多停留在「发现线索/产生悬念/形成动机」的未完成态；
+                   c. 细纲主体只写本章：发生什么、为什么、带来什么变化；
+                4. hook 只许写悬而未决的悬念，禁止把下一章剧情动作写进 hook；
+                5. 每章 1-3 张场景卡。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.creationChapterNames,
+                name: "章节标题生成 · 系统提示词",
+                category: "立项",
+                placeholders: [],
+                defaultText: """
+                你是一位资深小说策划，为指定的一卷生成全部章节标题。
+                用户会给出作品背景（书名/梗概/卷纲/角色等）、卷名与本章数。请只输出这一卷章节标题的 JSON 数组（不要输出其他内容）：
+                [{"title": "章节标题"}, {"title": "章节标题"}]
+
+                铁律（作者意图至上）：
+                1. 标题数量必须与要求的本章数完全一致，顺序按故事推进排列；
+                2. 标题连起来能看出剧情递进，每个标题点出该章核心事件；作者明确给出的情节必须落在对应标题或紧邻标题；
+                3. 标题不用标注「第N章」序号，只用标题本身；避免重复用词与流水账；
+                4. 只生成本卷标题，不得越界到其他卷的核心事件。
                 """
             ),
             BuiltInPrompt(

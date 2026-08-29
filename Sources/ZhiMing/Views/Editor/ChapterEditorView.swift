@@ -20,6 +20,9 @@ struct ChapterEditorView: View {
     // 会话内模型切换（仅当前编辑器生效）
     @State private var sessionProvider: ProviderConfig?
     @State private var showModelSelector = false
+    /// 进入页面时的默认提供商快照：避免 body 直接读 store 而订阅全局刷新——
+    /// 每次防抖保存都会触达全局 objectWillChange，长文编辑时会把编辑器整树重算，造成卡顿
+    @State private var cachedDefaultProvider: ProviderConfig?
 
     // 摘要（叙事账本）
     @State private var summaryGenerating = false
@@ -40,8 +43,8 @@ struct ChapterEditorView: View {
 
     private var novel: Novel? { chapter.volume?.novel }
 
-    /// 会话内选择的模型优先，否则用全局默认提供商
-    private var activeProvider: ProviderConfig? { sessionProvider ?? store.defaultProvider }
+    /// 会话内选择的模型优先，否则用进入页面时的全局默认提供商快照
+    private var activeProvider: ProviderConfig? { sessionProvider ?? cachedDefaultProvider }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -98,6 +101,10 @@ struct ChapterEditorView: View {
         .zmOnChange(of: text) { newValue in
             chapter.content = newValue          // 轻量同步正文
             scheduleSave()                      // 防抖保存：字数与落盘不逐键执行
+        }
+        .onAppear {
+            // 进入页面即快照默认提供商；编辑器不再订阅 store 全局刷新（长文编辑卡顿修复）
+            if cachedDefaultProvider == nil { cachedDefaultProvider = store.defaultProvider }
         }
         // 快照回退等外部改动同步回编辑器
         .zmOnChange(of: chapter.content) { newValue in
@@ -398,7 +405,8 @@ struct ChapterEditorView: View {
     private func scheduleSave() {
         saveTask?.cancel()
         saveTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 800_000_000)
+            // 1.2s 防抖：减少全量 library.json 编码与全局刷新的频率（长文编辑卡顿优化）
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
             saveNow()
         }

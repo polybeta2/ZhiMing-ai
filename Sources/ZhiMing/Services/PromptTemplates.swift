@@ -125,6 +125,22 @@ enum PromptTemplates {
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
+    /// 章节标题批次：为一卷生成全部章节标题
+    static func creationChapterNames(context: String, supplement: String?) -> [LLMMessage] {
+        var system = PromptLibrary.shared.resolvedText(for: PromptID.creationChapterNames)
+        if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !supplement.isEmpty {
+            system += "\n\n" + supplement
+        }
+        let user = """
+        【作品背景】
+        \(context)
+
+        请根据目标卷名与本章数，输出该卷全部章节标题。
+        """
+        return [.init(role: .system, content: system), .init(role: .user, content: user)]
+    }
+
     /// 细纲批次：只为 targets 中的章节生成细纲
     static func creationChapterBatch(context: String, targets: [String], supplement: String?) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationChapterBatch)

@@ -150,6 +150,18 @@ struct BlueprintCardsView: View {
                             }
                         }
                     }
+                    // 长篇小说蓝图：该卷章节全无标题时，提供 AI 一次性补全标题
+                    if vm.isEmptyVolumeTitles(volume) {
+                        Button {
+                            vm.generateChapterNames(volumeIndex: vm.blueprint?.volumes.firstIndex(where: { $0.id == volume.id }) ?? -1)
+                        } label: {
+                            Label("AI 生成本卷章节标题（\(volume.chapters.count) 章）",
+                                  systemImage: "text.badge.plus")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(vm.isStreaming)
+                    }
                     addButton("添加章节") {
                         volume.chapters.append(BlueprintChapter())
                     }
