@@ -251,7 +251,8 @@ struct ChapterEditorView: View {
             chapter: chapter,
             novel: novel,
             provider: provider,
-            instruction: instruction
+            instruction: instruction,
+            styleProfiles: store.styleProfiles
         )
     }
 
@@ -274,7 +275,8 @@ struct ChapterEditorView: View {
             chapter: chapter,
             novel: novel,
             provider: provider,
-            instruction: effectiveInstruction
+            instruction: effectiveInstruction,
+            styleProfiles: store.styleProfiles
         )
     }
 

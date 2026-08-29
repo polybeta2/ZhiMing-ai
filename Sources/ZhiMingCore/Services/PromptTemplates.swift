@@ -27,14 +27,19 @@ public enum PromptTemplates {
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
-    public static func rewrite(mode: String, selection: String, instruction: String?) -> [LLMMessage] {
+    public static func rewrite(mode: String, selection: String, instruction: String?,
+                               styleCard: String? = nil) -> [LLMMessage] {
         // 「去AI味」走专属模板；其余模式共用通用改写模板
-        let system: String
+        var system: String
         if mode == "去AI味" {
             system = PromptLibrary.shared.resolvedText(for: PromptID.antiAIFlavor)
         } else {
             let template = PromptLibrary.shared.resolvedText(for: PromptID.rewrite)
             system = PromptLibrary.render(template, values: ["mode": mode])
+        }
+        // 文风档案卡（.writing 或 .antiAI variant），未启用档案时为 nil
+        if let card = styleCard, !card.isEmpty {
+            system += "\n\n" + card
         }
         let user = """
         【原文】

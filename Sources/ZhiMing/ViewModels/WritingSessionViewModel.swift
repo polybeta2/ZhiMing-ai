@@ -18,7 +18,8 @@ final class WritingSessionViewModel: ObservableObject {
     let progress = StreamProgressTracker()
     private var streamTask: Task<Void, Never>?
 
-    func start(mode: Mode, chapter: Chapter, novel: Novel, provider: ProviderConfig, instruction: String?) {
+    func start(mode: Mode, chapter: Chapter, novel: Novel, provider: ProviderConfig,
+               instruction: String?, styleProfiles: [StyleProfile] = []) {
         guard phase != .streaming else { return }
         draft = ""
         errorMessage = nil
@@ -42,27 +43,37 @@ final class WritingSessionViewModel: ObservableObject {
             r18Text = nil
         }
 
+        // 文风档案注入卡：撰写/续写/改写/润色/扩写用 .writing，去AI味用 .antiAI（渲染器已按预算裁剪）
+        let styleCard: String?
+        switch mode {
+        case .rewrite(let rewriteMode, _) where rewriteMode == "去AI味":
+            styleCard = novel.styleProfileCard(in: styleProfiles, variant: .antiAI)
+        default:
+            styleCard = novel.styleProfileCard(in: styleProfiles, variant: .writing)
+        }
+
         let baseMessages: [LLMMessage]
         switch mode {
         case .writing(let wordTarget):
             // 从零撰写整章：content 为空时正文末尾段自然为空，上下文装配与续写共用
             let budget = PromptTemplates.adjustedInputBudget(
                 base: provider.contextBudgetChars,
-                injections: r18Text, provider.systemPromptExtra)
-            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget)
+                injections: r18Text, styleCard, provider.systemPromptExtra)
+            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget, styleCard: styleCard)
             truncatedSections = context.truncatedSections
             baseMessages = PromptTemplates.writing(context: context, wordTarget: wordTarget, extra: instruction)
         case .continueWriting(let wordTarget):
-            // 动态注入（R18/附加指令）先占用预算，剩余额度才装配上下文
+            // 动态注入（R18/文风档案/附加指令）先占用预算，剩余额度才装配上下文
             let budget = PromptTemplates.adjustedInputBudget(
                 base: provider.contextBudgetChars,
-                injections: r18Text, provider.systemPromptExtra)
-            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget)
+                injections: r18Text, styleCard, provider.systemPromptExtra)
+            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget, styleCard: styleCard)
             truncatedSections = context.truncatedSections
             baseMessages = PromptTemplates.continueWriting(context: context, wordTarget: wordTarget, extra: instruction)
             // 注：不得把上下文写入日志——正文/细纲/摘要均属用户隐私（验收用的 print 已移除）
         case .rewrite(let rewriteMode, let selection):
-            baseMessages = PromptTemplates.rewrite(mode: rewriteMode, selection: selection, instruction: instruction)
+            baseMessages = PromptTemplates.rewrite(mode: rewriteMode, selection: selection,
+                                                   instruction: instruction, styleCard: styleCard)
         }
         var scoped = baseMessages
         if let r18 = r18Text {

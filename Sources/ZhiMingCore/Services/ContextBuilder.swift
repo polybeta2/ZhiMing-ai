@@ -30,7 +30,8 @@ public enum ContextBuilder {
         return "……" + String(text.suffix(limit))
     }
 
-    public static func buildContinueContext(chapter: Chapter, novel: Novel, budgetChars: Int) -> BuiltContext {
+    public static func buildContinueContext(chapter: Chapter, novel: Novel, budgetChars: Int,
+                                            styleCard: String? = nil) -> BuiltContext {
         var required: [String] = []
         var high: [(String, String)] = []
         var optional: [(String, String)] = []
@@ -39,6 +40,10 @@ public enum ContextBuilder {
         if let style = novel.styleGuide, !style.isEmpty {
             required.append("【风格约束】\n"
                 + cappedRequired(style, label: "风格约束", truncated: &truncated))
+        }
+        if let card = styleCard, !card.isEmpty {
+            // 文风档案卡（渲染器已按 PromptLimits.styleProfileCap 截断，此处不再裁剪）
+            required.append(card)
         }
         if let outline = chapter.detailedOutline, !outline.isEmpty {
             required.append("【本章细纲】\n"
