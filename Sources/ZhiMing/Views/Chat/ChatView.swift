@@ -454,10 +454,14 @@ struct ChatView: View {
             ? PromptLibrary.shared.resolvedText(for: PromptID.assistantReadWrite)
             : nil
 
+        // 文风档案卡（.writing variant）：助手回答也贴合本书文风
+        let styleCard = novel.styleProfileCard(in: store.styleProfiles, variant: .writing)
+
         var system = PromptTemplates.writingAssistantSystem(
             title: novel.title,
             synopsis: novel.synopsis,
-            styleGuide: novel.styleGuide
+            styleGuide: novel.styleGuide,
+            styleCard: styleCard
         )
         // 设定上下文：让助手读懂角色状态/世界观/叙事账本/全书结构与最近实际走向（两种模式都注入）
         let budget = PromptTemplates.adjustedInputBudget(

@@ -356,7 +356,8 @@ private struct VolumeOutlineSection: View {
             showNoProviderAlert = true
             return
         }
-        vm.start(kind: .volume(volume), novel: novel, provider: provider, instruction: nil)
+        vm.start(kind: .volume(volume), novel: novel, provider: provider, instruction: nil,
+                 styleProfiles: store.styleProfiles)
     }
 
     private func regenerate() {
@@ -591,7 +592,8 @@ private struct ChapterOutlineEditSheet: View {
         }
         let extra = aiInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         vm.start(kind: .chapter(chapter), novel: novel, provider: provider,
-                 instruction: extra.isEmpty ? nil : extra)
+                 instruction: extra.isEmpty ? nil : extra,
+                 styleProfiles: store.styleProfiles)
     }
 
     private func regenerate() {

@@ -155,7 +155,8 @@ public extension ContextBuilder {
     /// 必需层：梗概/风格 + 目标现状（卷信息 或 所在卷/相邻章/本章现状）
     /// 高优先层：前文摘要、关键事实、最近正文节选（增强：对齐已写走向，防细纲与成稿脱节）
     /// 可选层：全书结构（卷纲用）、场景角色卡（细纲用）
-    static func buildOutlineContext(target: OutlineTarget, novel: Novel, budgetChars: Int) -> BuiltContext {
+    static func buildOutlineContext(target: OutlineTarget, novel: Novel, budgetChars: Int,
+                                    styleCard: String? = nil) -> BuiltContext {
         var required: [String] = []
         var high: [(String, String)] = []
         var optional: [(String, String)] = []
@@ -178,6 +179,10 @@ public extension ContextBuilder {
         if let style = novel.styleGuide, !style.isEmpty {
             required.append("【风格约束】\n"
                 + cappedRequired(style, label: "风格约束", truncated: &truncated))
+        }
+        if let card = styleCard, !card.isEmpty {
+            // 文风档案卡（.outline variant，渲染器已按 styleProfileOutlineCap 截断）
+            required.append(card)
         }
 
         let previous = summaries(before: anchorIndex, in: novel, limit: 3)

@@ -37,7 +37,8 @@ final class OutlineAssistViewModel: ObservableObject {
     /// 批量重试参数
     private var lastBatchRequest: (chapters: [Chapter], volume: Volume?, novel: Novel, instruction: String?)?
 
-    func start(kind: OutlineTarget, novel: Novel, provider: ProviderConfig, instruction: String?) {
+    func start(kind: OutlineTarget, novel: Novel, provider: ProviderConfig, instruction: String?,
+               styleProfiles: [StyleProfile] = []) {
         guard phase != .streaming else { return }
         lastRequest = (kind, instruction)
         draft = ""
@@ -67,12 +68,14 @@ final class OutlineAssistViewModel: ObservableObject {
         let r18Text: String? = novel.r18Enabled
             ? PromptLibrary.shared.r18Supplement(forInput: sample)
             : nil
+        // 文风档案卡（.outline 轻量 variant：仅视角/节奏/对白概要）
+        let styleCard = novel.styleProfileCard(in: styleProfiles, variant: .outline)
 
-        // 动态注入（R18/附加指令）先占用预算，剩余额度才装配上下文（v1.7）
+        // 动态注入（R18/文风档案/附加指令）先占用预算，剩余额度才装配上下文（v1.7）
         let budget = PromptTemplates.adjustedInputBudget(
             base: provider.contextBudgetChars,
-            injections: r18Text, provider.systemPromptExtra)
-        let context = ContextBuilder.buildOutlineContext(target: kind, novel: novel, budgetChars: budget)
+            injections: r18Text, styleCard, provider.systemPromptExtra)
+        let context = ContextBuilder.buildOutlineContext(target: kind, novel: novel, budgetChars: budget, styleCard: styleCard)
         truncatedSections = context.truncatedSections
 
         var scoped = PromptTemplates.outline(systemID: systemID, context: context, instruction: instruction)
@@ -162,13 +165,16 @@ final class OutlineAssistViewModel: ObservableObject {
         let r18Text: String? = novel.r18Enabled
             ? PromptLibrary.shared.r18Supplement(forInput: sample)
             : nil
+        // 文风档案卡（.outline 轻量 variant）
+        let styleCard = novel.styleProfileCard(in: store.styleProfiles, variant: .outline)
 
         let budget = PromptTemplates.adjustedInputBudget(
             base: provider.contextBudgetChars,
-            injections: r18Text, provider.systemPromptExtra)
+            injections: r18Text, styleCard, provider.systemPromptExtra)
 
         var system = PromptLibrary.shared.resolvedText(for: PromptID.chapterBatchOutline)
         if let r18 = r18Text, !r18.isEmpty { system += "\n\n" + r18 }
+        if let card = styleCard, !card.isEmpty { system += "\n\n" + card }
         if let extra = provider.systemPromptExtra, !extra.isEmpty { system += "\n\n" + extra }
 
         let user = batchUserPrompt(chapters: chapters, volume: volume, novel: novel,

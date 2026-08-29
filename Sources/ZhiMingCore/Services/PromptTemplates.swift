@@ -181,9 +181,10 @@ public enum PromptTemplates {
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
-    /// 写作助手系统提示词：{title} 占位符 + 梗概/风格约束条件追加（保持原语义）。
+    /// 写作助手系统提示词：{title} 占位符 + 梗概/风格约束/文风档案条件追加（保持原语义）。
     /// 梗概/风格为用户可无限编辑字段，超长时保留尾部（v1.7 必需层兜底）。
-    public static func writingAssistantSystem(title: String, synopsis: String, styleGuide: String?) -> String {
+    public static func writingAssistantSystem(title: String, synopsis: String, styleGuide: String?,
+                                              styleCard: String? = nil) -> String {
         let template = PromptLibrary.shared.resolvedText(for: PromptID.writingAssistant)
         var system = PromptLibrary.render(template, values: ["title": title])
         let cappedSynopsis = tailCapped(synopsis)
@@ -191,6 +192,9 @@ public enum PromptTemplates {
         if let style = styleGuide, !style.isEmpty {
             let cappedStyle = tailCapped(style)
             if !cappedStyle.isEmpty { system += "\n风格约束：\(cappedStyle)" }
+        }
+        if let card = styleCard, !card.isEmpty {
+            system += "\n" + card
         }
         return system
     }
