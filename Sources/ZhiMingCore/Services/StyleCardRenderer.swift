@@ -1,10 +1,11 @@
 import Foundation
 
-/// 文风档案的消费场景（对应设计稿 §4.1 渲染表；eval 为 P2 预留）
+/// 文风档案的消费场景（对应设计稿 §4.1 渲染表）
 public enum StyleCardVariant {
     case writing    // 续写/撰写/润色/扩写
-    case outline    // 大纲/批量细纲（P1 启用）
+    case outline    // 大纲/批量细纲
     case antiAI     // 去AI味专项
+    case eval       // 风格体检基准（全维 rubric，P2）
 }
 
 /// 把 StyleProfile 裁剪渲染为注入文本。
@@ -18,6 +19,7 @@ public enum StyleCardRenderer {
         case .writing: budget = PromptLimits.styleProfileCap
         case .outline: budget = PromptLimits.styleProfileOutlineCap
         case .antiAI: budget = PromptLimits.styleProfileAntiAICap
+        case .eval: budget = PromptLimits.styleProfileEvalCap
         }
 
         var sections: [String] = []
@@ -46,6 +48,17 @@ public enum StyleCardRenderer {
             appendNumberedList("禁止模式", profile.antiAI.forbiddenPatterns, into: &sections)
             appendNumberedList("自检清单", profile.antiAI.revisionChecks, into: &sections)
             appendNumberedList("该文风禁用套话", profile.diction.bannedMoves, into: &sections)
+        case .eval:
+            // 体检基准：全维明细 + 规则 + 自检清单，供评估逐维对照打分
+            sections.append("【文风档案：\(profile.name) · 风格体检基准】")
+            if !profile.fingerprintSummary.isEmpty {
+                sections.append("风格指纹：\(profile.fingerprintSummary)")
+            }
+            appendNumberedList("必遵规则", profile.mustRules, into: &sections)
+            if let lines = layerLines(profile) { sections.append(lines) }
+            appendNumberedList("自检清单", profile.antiAI.revisionChecks, into: &sections)
+            appendNumberedList("绝对禁止", profile.avoidRules + profile.antiAI.forbiddenPatterns, into: &sections)
+            appendExamples(profile.examples, into: &sections)
         }
 
         var out = ""

@@ -28,6 +28,8 @@ struct ChapterEditorView: View {
     }
     @State private var sessionStyle: SessionStyle = .followBook
     @State private var showStylePicker = false
+    @State private var showEvalSheet = false
+    @State private var showEvalNeedsText = false
     /// 进入页面时的默认提供商快照：避免 body 直接读 store 而订阅全局刷新——
     /// 每次防抖保存都会触达全局 objectWillChange，长文编辑时会把编辑器整树重算，造成卡顿
     @State private var cachedDefaultProvider: ProviderConfig?
@@ -146,6 +148,21 @@ struct ChapterEditorView: View {
         .sheet(isPresented: $showStylePicker) {
             SessionStylePickerSheet(selection: $sessionStyle, novel: novel)
         }
+        .sheet(isPresented: $showEvalSheet) {
+            if let provider = activeProvider {
+                StyleEvalSheet(
+                    draft: text,
+                    draftTitle: chapter.title,
+                    evalCard: styleCard(variant: .eval) ?? "（未启用文风档案，仅按通用编辑标准体检）",
+                    provider: provider
+                )
+            }
+        }
+        .alert("正文太短", isPresented: $showEvalNeedsText) {
+            Button("好的", role: .cancel) {}
+        } message: {
+            Text("风格体检至少需要 60 字正文，先写一点再来。")
+        }
         .alert("尚未配置模型提供商", isPresented: $showNoProviderAlert) {
             Button("去设置") { showSettings = true }
             Button("取消", role: .cancel) {}
@@ -222,6 +239,14 @@ struct ChapterEditorView: View {
                     guard ensureProvider() else { return }
                     rewritePresetMode = "去AI味"
                     showRewriteSheet = true
+                }
+                toolButton("体检", icon: "stethoscope") {
+                    guard ensureProvider() else { return }
+                    guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 60 else {
+                        showEvalNeedsText = true
+                        return
+                    }
+                    showEvalSheet = true
                 }
                 toolButton(chapter.summary == nil ? "生成摘要" : "摘要", icon: "doc.plaintext") {
                     if chapter.summary != nil {

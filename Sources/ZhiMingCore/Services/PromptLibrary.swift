@@ -105,6 +105,7 @@ public enum PromptID {
     public static let styleDistillAnalyze = "prompt.style.distill.analyze.system"
     public static let styleDistillCard = "prompt.style.distill.card.system"
     public static let styleDistillFix = "prompt.style.distill.fix.system"
+    public static let styleEval = "prompt.style.eval.system"
 }
 
 // MARK: - 提示词与标签库（全局单例）
@@ -833,6 +834,37 @@ public final class PromptLibrary: ObservableObject {
                 - 严格输出 JSON 数组（不要输出其他内容）：
                 [{"index": 0, "styled": "重写后的示范句", "principle": "体现的机制"}]
                 - index 与【违规示范】列表一一对应，逐条都要给出。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.styleEval,
+                name: "文风体检 · 系统提示词",
+                category: "文风",
+                placeholders: [],
+                defaultText: """
+                你是资深文学编辑，负责给小说草稿做「文风体检」：对照【体检基准】逐维打分，找出漂移与 AI 腔，只评估语言层机制，不评价情节好坏。
+                严格输出 JSON（不要输出其他内容）：
+                {
+                  "overall": 0 到 10 的整数总评分,
+                  "scores": [
+                    {"dimension": "叙事声音", "score": 0, "note": "一句话依据"},
+                    {"dimension": "句法节奏", "score": 0, "note": "一句话依据（对照句长/标点结论）"},
+                    {"dimension": "词汇质地", "score": 0, "note": "一句话依据"},
+                    {"dimension": "场景节奏", "score": 0, "note": "一句话依据"},
+                    {"dimension": "对白", "score": 0, "note": "一句话依据"},
+                    {"dimension": "情绪处理", "score": 0, "note": "一句话依据"},
+                    {"dimension": "反AI抵抗力", "score": 0, "note": "一句话依据"}
+                  ],
+                  "drifts": ["偏离基准的具体位置与表现"],
+                  "ai_flavor": ["AI 腔句或模式，引用草稿片段不超过30字"],
+                  "moves": ["具体可执行的修改动作"]
+                }
+
+                铁律：
+                1. scores 恰好 7 项且顺序与上述一致，score 为 0-10 整数，note 必须引用草稿中的实际表现；
+                2. 【本地体检结果】是程序统计的客观线索，相关维度打分须与其呼应；
+                3. ai_flavor 只收确实有机器腔的句子，没有就给空数组，不得凑数；
+                4. 只输出 JSON。
                 """
             ),
         ]
