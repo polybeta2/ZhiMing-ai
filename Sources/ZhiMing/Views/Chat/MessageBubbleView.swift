@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// 消息气泡 + 流式光标 + Markdown 轻量渲染（AttributedString）
@@ -101,3 +102,4 @@ private struct StreamingCursorModifier: ViewModifier {
         }
     }
 }
+#endif

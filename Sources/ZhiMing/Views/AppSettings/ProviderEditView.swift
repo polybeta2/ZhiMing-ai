@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 提供商新增/编辑表单；「测试连接」调用 testConnection()，「获取模型」拉取 /models 列表
 struct ProviderEditView: View {
@@ -396,3 +398,4 @@ private struct ModelPickSheet: View {
         }
     }
 }
+#endif

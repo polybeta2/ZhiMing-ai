@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 蓝图可编辑卡片组：书名/主题/梗概/视角/风格 + 角色列表 + 世界观列表 + 卷纲章纲
 /// 每条可就地编辑、删除；条目可新增
@@ -200,3 +202,4 @@ struct BlueprintCardsView: View {
         .foregroundStyle(Color.accentColor)
     }
 }
+#endif

@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 版本历史与回退（对标司命版本历史）
 /// 行：版本号 + 触发类型徽标（手动/AI/回退）+ 时间 + 字数；点击预览，确认后回退
@@ -143,3 +145,4 @@ private struct SnapshotPreviewSheet: View {
         }
     }
 }
+#endif

@@ -2,11 +2,11 @@ import Foundation
 
 #if DEBUG
 /// 仅 DEBUG：注入演示数据，便于预览与真机体验
-enum SeedData {
+public enum SeedData {
 
     /// 注入演示作品（1 卷 3 章、2 角色、2 世界观条目）；仅在空库时调用
     @MainActor
-    static func inject(into store: AppStore) {
+    public static func inject(into store: AppStore) {
         let novel = Novel(title: "雾港来信", synopsis: "十九世纪末的雾港，一名失忆的灯塔看守人收到一封写给自己的讣告。")
         novel.genre = "悬疑/哥特"
         novel.perspective = "第三人称限知"

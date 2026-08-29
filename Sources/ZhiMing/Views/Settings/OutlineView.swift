@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 卷纲与章细纲编辑：卷列表（增删改卷名+卷纲），每卷下章节的细纲快捷编辑入口。
 /// AI 辅助：卷纲/细纲均可流式生成草稿；「采纳」只把草稿填入编辑框，
@@ -938,3 +940,4 @@ private struct ForeshadowDashboardSection: View {
         return "位置未知"
     }
 }
+#endif

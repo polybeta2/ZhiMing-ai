@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 作品工作台：章节 / 设定 / 统计 / 助手 四页签 + 工具栏导出入口
 struct NovelDetailView: View {
@@ -222,3 +224,4 @@ private struct AssistantPane: View {
         }
     }
 }
+#endif

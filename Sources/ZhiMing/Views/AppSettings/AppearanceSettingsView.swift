@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// 外观设置：强调色五选一 + 深色模式（跟随/浅/深）
@@ -39,3 +40,4 @@ struct AppearanceSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
+#endif

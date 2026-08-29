@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 开发者功能面板：内置提示词编辑（改后立即生效）+ 示例标签库管理。
 /// 入口在设置页，进入前有强提醒对话框（见 SettingsView）。
@@ -290,3 +292,4 @@ struct TagEditView: View {
         dismiss()
     }
 }
+#endif

@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 首页：作品卡片列表（对标 Kelivo 会话列表卡片行）
 struct NovelListView: View {
@@ -214,3 +216,4 @@ private struct NovelCardRow: View {
         return formatter.localizedString(for: date, relativeTo: .now)
     }
 }
+#endif

@@ -1,24 +1,24 @@
 import Foundation
 
 /// 导出格式
-enum ExportFormat: Hashable {
+public enum ExportFormat: Hashable {
     case txt
     case markdown
 }
 
 /// 导出范围
-enum ExportScope: Hashable {
+public enum ExportScope: Hashable {
     case fullNovel       // 全书
     case singleVolume(UUID)  // 单卷
     case outlineOnly     // 仅大纲
 }
 
 /// 小说导出服务（TXT / Markdown）
-enum ExportService {
+public enum ExportService {
 
     // MARK: - 导出入口
 
-    static func export(novel: Novel, scope: ExportScope, format: ExportFormat) -> String {
+    public static func export(novel: Novel, scope: ExportScope, format: ExportFormat) -> String {
         switch scope {
         case .fullNovel:
             return renderFullNovel(novel, format: format)
@@ -30,7 +30,7 @@ enum ExportService {
         }
     }
 
-    static func fileName(novel: Novel, scope: ExportScope, format: ExportFormat) -> String {
+    public static func fileName(novel: Novel, scope: ExportScope, format: ExportFormat) -> String {
         let ext = format == .txt ? "txt" : "md"
         let base = "《\(novel.title)》"
         switch scope {
@@ -45,7 +45,7 @@ enum ExportService {
     }
 
     /// 原子写入临时目录（UTF-8），失败返回 nil
-    static func writeTemporaryFile(content: String, fileName: String) -> URL? {
+    public static func writeTemporaryFile(content: String, fileName: String) -> URL? {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(fileName)
         do {

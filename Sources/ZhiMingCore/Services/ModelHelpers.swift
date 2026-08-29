@@ -1,13 +1,13 @@
 import Foundation
 
-extension Array {
+public extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
 }
 
 /// 模型层的通用辅助（排序、全局章序等）
-extension Novel {
+public extension Novel {
     var sortedVolumes: [Volume] {
         volumes.sorted { $0.sortOrder < $1.sortOrder }
     }
@@ -32,7 +32,7 @@ extension Novel {
     }
 }
 
-extension Volume {
+public extension Volume {
     var sortedChapters: [Chapter] {
         chapters.sorted { $0.sortOrder < $1.sortOrder }
     }

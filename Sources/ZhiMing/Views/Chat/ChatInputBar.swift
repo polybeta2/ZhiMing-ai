@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// 多行输入 + 发送/停止（流式中发送键变停止键），iMessage 式胶囊输入框
@@ -50,3 +51,4 @@ struct ChatInputBar: View {
         .background(.bar)
     }
 }
+#endif

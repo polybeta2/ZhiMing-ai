@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 设置页：Kelivo 风格分组卡片（模型与服务 / 外观 / 关于）
 struct SettingsView: View {
@@ -130,3 +132,4 @@ struct SettingsView: View {
         .hidden()
     }
 }
+#endif

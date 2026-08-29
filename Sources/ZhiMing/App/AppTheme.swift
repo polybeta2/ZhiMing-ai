@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 
 #if canImport(UIKit)
@@ -201,3 +202,4 @@ extension Color {
         #endif
     }
 }
+#endif

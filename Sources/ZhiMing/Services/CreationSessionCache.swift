@@ -1,3 +1,4 @@
+#if os(iOS) || os(macOS)
 import Foundation
 import SQLite3
 
@@ -89,3 +90,4 @@ enum CreationSessionCache {
         sqlite3_exec(db, "DELETE FROM creation_sessions;", nil, nil, nil)
     }
 }
+#endif

@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 模型切换（单选列表；仅当前会话生效）
 struct ModelSelectorSheet: View {
@@ -66,3 +68,4 @@ struct ModelSelectorSheet: View {
         return provider.id == store.defaultProvider?.id
     }
 }
+#endif

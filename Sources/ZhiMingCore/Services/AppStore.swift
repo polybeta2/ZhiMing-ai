@@ -1,24 +1,35 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#endif
 
 /// 全局数据仓库：承担原计划中 SwiftData ModelContainer/ModelContext 的职责。
 /// JSON 文档原子写入 Application Support，字段与关系语义不变。
 /// iOS 15 兼容：ObservableObject + 手动 objectWillChange 通知。
 @MainActor
-final class AppStore: ObservableObject {
-    @Published var novels: [Novel] = []
-    @Published var providers: [ProviderConfig] = []
+public final class AppStore: ObservableObject {
+    @Published public var novels: [Novel] = []
+    @Published public var providers: [ProviderConfig] = []
     /// 每次保存自增，驱动观察 store 的视图刷新（嵌套模型变更的兜底通知）
-    @Published private(set) var revision = 0
+    @Published public private(set) var revision = 0
     /// 最近一次保存失败的提示（nil = 正常）；由根界面以 alert 呈现，不再静默丢数据
-    @Published private(set) var lastSaveError: String?
+    @Published public private(set) var lastSaveError: String?
+    /// 删除提供商时清理其 Keychain 密钥的钩子；App 启动注入，未注入（Linux 测试）为无操作
+    public var providerKeyDeleter: ((String) -> Void)?
 
     private struct Document: Codable {
         var novels: [Novel]
         var providers: [ProviderConfig]
     }
 
+    /// 测试注入：重定向数据目录（Linux XCTest 指向临时目录，避免读写真实用户数据）
+    public static var directoryOverride: URL?
+
     private static var directory: URL {
+        if let override = directoryOverride {
+            try? FileManager.default.createDirectory(at: override, withIntermediateDirectories: true)
+            return override
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let dir = base.appendingPathComponent("ZhiMing", isDirectory: true)
@@ -27,11 +38,11 @@ final class AppStore: ObservableObject {
     }
 
     /// 数据文件：Application Support/ZhiMing/library.json
-    static var fileURL: URL { directory.appendingPathComponent("library.json") }
+    public static var fileURL: URL { directory.appendingPathComponent("library.json") }
     /// 单代备份：主文件损坏/不可读时的最后恢复手段
-    static var backupURL: URL { directory.appendingPathComponent("library.json.bak") }
+    public static var backupURL: URL { directory.appendingPathComponent("library.json.bak") }
 
-    static func load() -> AppStore {
+    public static func load() -> AppStore {
         let store = AppStore()
         let fm = FileManager.default
         let primaryExisted = fm.fileExists(atPath: fileURL.path)
@@ -75,7 +86,7 @@ final class AppStore: ObservableObject {
     private static var lastBackupAt = Date.distantPast
 
     /// 原子保存；所有写操作完成后调用。失败不再静默：写入 lastSaveError 供界面提示。
-    func save() {
+    public func save() {
         revision += 1
         let doc = Document(novels: novels, providers: providers)
         let encoder = JSONEncoder()
@@ -100,38 +111,39 @@ final class AppStore: ObservableObject {
         try? data.write(to: backupURL, options: [.atomic])
     }
 
-    func clearSaveError() { lastSaveError = nil }
+    public func clearSaveError() { lastSaveError = nil }
 
-    var defaultProvider: ProviderConfig? {
+    public var defaultProvider: ProviderConfig? {
         providers.first(where: \.isDefault) ?? providers.first
     }
 
     // MARK: - 便捷操作
 
-    func deleteNovel(_ novel: Novel) {
+    public func deleteNovel(_ novel: Novel) {
         // 子树（卷/章/角色/世界观/会话）随对象图一并释放，等价级联删除
         novels.removeAll { $0.id == novel.id }
         save()
     }
 
-    func deleteProvider(_ provider: ProviderConfig) {
+    public func deleteProvider(_ provider: ProviderConfig) {
         // 先落盘再删密钥：若保存失败重启后提供商仍可见，用户可重新补录密钥而非凭空消失
         providers.removeAll { $0.id == provider.id }
         if providers.isEmpty == false, !providers.contains(where: \.isDefault) {
             providers.first?.isDefault = true
         }
         save()
-        _ = KeychainHelper.delete(account: provider.apiKeyID)
+        // Keychain 依赖 Security 框架，不进 ZhiMingCore：由 App 层启动时注入清理钩子
+        providerKeyDeleter?(provider.apiKeyID)
     }
 
-    func makeDefault(_ provider: ProviderConfig) {
+    public func makeDefault(_ provider: ProviderConfig) {
         for p in providers { p.isDefault = (p.id == provider.id) }
         save()
     }
 }
 
 #if DEBUG
-extension AppStore {
+public extension AppStore {
     /// 预览专用：不落盘
     static func preview() -> AppStore {
         let store = AppStore()

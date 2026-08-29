@@ -1,5 +1,7 @@
+#if os(iOS) || os(macOS)
 import Foundation
 import Combine
+import ZhiMingCore
 
 /// AI 写作会话：流式草稿状态机（续写 / 改写）
 /// iOS 15 兼容：ObservableObject + @Published
@@ -148,3 +150,4 @@ final class WritingSessionViewModel: ObservableObject {
         KeepAwake.set(false)
     }
 }
+#endif

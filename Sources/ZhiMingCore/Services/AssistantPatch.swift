@@ -1,7 +1,7 @@
 import Foundation
 
 /// 写作助手访问模式：只读 = 仅建议；读写 = 可提议补丁，经用户确认后写入设定。
-enum AssistantAccessMode: String {
+public enum AssistantAccessMode: String {
     case readOnly = "只读"
     case readWrite = "读写"
 }
@@ -11,13 +11,13 @@ enum AssistantAccessMode: String {
 /// 模型本身没有直接写权——apply(to:store:) 只会由用户在确认卡上点「应用」触发。
 /// 范围：角色增改、世界观增改、梗概/视角/风格更新、卷/章重命名、章节场景卡增删改；
 /// 仍不支持删除角色/世界观/卷/章本体。
-struct AssistantPatch: Codable {
-    struct CharacterUpdate: Codable {
+public struct AssistantPatch: Codable {
+    public struct CharacterUpdate: Codable {
         let find: String
         let set: [String: String]
     }
 
-    struct CharacterAdd: Codable {
+    public struct CharacterAdd: Codable {
         let name: String
         var aliases: [String]?
         var appearance: String?
@@ -29,26 +29,26 @@ struct AssistantPatch: Codable {
         var mentalState: String?
     }
 
-    struct WorldUpsert: Codable {
+    public struct WorldUpsert: Codable {
         var category: String?
         var name: String
         var content: String
     }
 
-    struct NovelUpdates: Codable {
+    public struct NovelUpdates: Codable {
         var synopsis: String?
         var perspective: String?
         var styleGuide: String?
     }
 
     /// 重命名指令（卷/章共用）：find=现有名称（卷支持「第N卷」），to=新名称
-    struct NameRename: Codable {
+    public struct NameRename: Codable {
         var find: String
         var to: String
     }
 
     /// 场景卡字段 DTO：全可选，便于模型省略空字段
-    struct SceneCardDTO: Codable {
+    public struct SceneCardDTO: Codable {
         var index: Int?
         var goal: String?
         var obstacle: String?
@@ -65,7 +65,7 @@ struct AssistantPatch: Codable {
     }
 
     /// 单章场景卡操作组：replace 与 update/add/remove 互斥（replace 优先）
-    struct SceneCardsOp: Codable {
+    public struct SceneCardsOp: Codable {
         var chapter: String
         var replace: [SceneCardDTO]?
         var update: [SceneCardDTO]?
@@ -73,29 +73,38 @@ struct AssistantPatch: Codable {
         var remove: [Int]?
     }
 
-    var summary: String?
-    var character_updates: [CharacterUpdate]?
-    var character_adds: [CharacterAdd]?
-    var world_upserts: [WorldUpsert]?
-    var novel_updates: NovelUpdates?
-    var volume_renames: [NameRename]?
-    var chapter_renames: [NameRename]?
-    var scene_cards: [SceneCardsOp]?
+    public var summary: String?
+    public var character_updates: [CharacterUpdate]?
+    public var character_adds: [CharacterAdd]?
+    public var world_upserts: [WorldUpsert]?
+    public var novel_updates: NovelUpdates?
+    public var volume_renames: [NameRename]?
+    public var chapter_renames: [NameRename]?
+    public var scene_cards: [SceneCardsOp]?
 
     // MARK: - 提取
 
     /// 从回复中提取补丁：优先找能解码成功的围栏块，兜底取全文首个 {…} 对象。
     /// 返回剥离补丁后的展示文本（供聊天气泡显示，不含裸 JSON）。
-    static func extract(in text: String) -> (patch: AssistantPatch?, cleanedText: String) {
-        guard let range = patchFenceRange(in: text) ?? jsonFallbackRange(in: text),
-              let patch = decode(String(text[range])),
-              !isEmptyPatch(patch) else {
-            return (nil, text)
+    /// 测试基线发现的存量 bug（v2.2.1）：原实现对整个围栏块（含 ``` 与语言标记）做 JSON
+    /// 解码，导致围栏形态永远失败、只有裸 JSON 出补丁卡；现改为解码围栏内 payload。
+    public static func extract(in text: String) -> (patch: AssistantPatch?, cleanedText: String) {
+        if let (fenceRange, payload) = fencePayloadRange(in: text),
+           let patch = decode(payload), !isEmptyPatch(patch) {
+            return (patch, stripped(text, range: fenceRange))
         }
+        if let range = jsonFallbackRange(in: text),
+           let patch = decode(String(text[range])), !isEmptyPatch(patch) {
+            return (patch, stripped(text, range: range))
+        }
+        return (nil, text)
+    }
+
+    /// 剥离补丁块并整理首尾空白（供聊天气泡显示）
+    private static func stripped(_ text: String, range: Range<String.Index>) -> String {
         var cleaned = text
         cleaned.replaceSubrange(range, with: "")
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (patch, cleaned)
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 只有包含至少一项实际变更的对象才算补丁，避免把普通 JSON 回复误判
@@ -109,8 +118,9 @@ struct AssistantPatch: Codable {
             && (patch.scene_cards?.isEmpty ?? true)
     }
 
-    /// 扫描 ``` 围栏：跳过语言标记行后能解码为补丁的第一个块
-    private static func patchFenceRange(in text: String) -> Range<String.Index>? {
+    /// 扫描 ``` 围栏：跳过语言标记行后能解码为补丁的第一个块，
+    /// 返回（完整围栏块范围，围栏内 payload 文本）
+    private static func fencePayloadRange(in text: String) -> (fence: Range<String.Index>, payload: String)? {
         var cursor = text.startIndex
         while let open = text.range(of: "```", range: cursor..<text.endIndex) {
             guard let close = text.range(of: "```", range: open.upperBound..<text.endIndex) else { return nil }
@@ -122,7 +132,7 @@ struct AssistantPatch: Codable {
                 payload = inner
             }
             if let patch = decode(String(payload)), !isEmptyPatch(patch) {
-                return open.lowerBound..<close.upperBound
+                return (open.lowerBound..<close.upperBound, String(payload))
             }
             cursor = close.upperBound
         }
@@ -144,7 +154,7 @@ struct AssistantPatch: Codable {
     // MARK: - 定位
 
     /// 角色定位：精确名/别名 → 双向包含匹配
-    static func matchCharacter(_ query: String, in novel: Novel) -> CharacterCard? {
+    public static func matchCharacter(_ query: String, in novel: Novel) -> CharacterCard? {
         let keyword = query.trimmingCharacters(in: .whitespaces)
         guard !keyword.isEmpty else { return nil }
         if let exact = novel.characters.first(where: { $0.name == keyword || $0.aliases.contains(keyword) }) {
@@ -154,7 +164,7 @@ struct AssistantPatch: Codable {
     }
 
     /// 卷定位：精确名 → 「第N卷」序号 → 双向包含
-    static func matchVolume(_ query: String, in novel: Novel) -> Volume? {
+    public static func matchVolume(_ query: String, in novel: Novel) -> Volume? {
         let keyword = query.trimmingCharacters(in: .whitespaces)
         guard !keyword.isEmpty else { return nil }
         if let exact = novel.volumes.first(where: { $0.name == keyword }) { return exact }
@@ -174,7 +184,7 @@ struct AssistantPatch: Codable {
     }
 
     /// 章定位：支持「卷名/章题」消歧 → 全书精确题名 → 双向包含
-    static func matchChapter(_ query: String, in novel: Novel) -> Chapter? {
+    public static func matchChapter(_ query: String, in novel: Novel) -> Chapter? {
         let keyword = query.trimmingCharacters(in: .whitespaces)
         guard !keyword.isEmpty else { return nil }
 
@@ -195,7 +205,7 @@ struct AssistantPatch: Codable {
     // MARK: - 变更清单（确认卡展示）
 
     /// 人可读的拟议变更行；找不到目标的条目也会列出并标注将跳过
-    func describe(novel: Novel) -> [String] {
+    public func describe(novel: Novel) -> [String] {
         var lines: [String] = []
         for update in character_updates ?? [] {
             if let target = Self.matchCharacter(update.find, in: novel) {
@@ -265,7 +275,7 @@ struct AssistantPatch: Codable {
 
     /// 写入数据层并保存；返回逐条结果（含跳过原因）供界面提示。
     @MainActor
-    func apply(to novel: Novel, store: AppStore) -> [String] {
+    public func apply(to novel: Novel, store: AppStore) -> [String] {
         var results: [String] = []
 
         for update in character_updates ?? [] {
@@ -308,7 +318,7 @@ struct AssistantPatch: Codable {
                 existing.content = upsert.content
                 results.append("✅ 更新世界观「\(name)」")
             } else {
-                let validCategories = Set(WorldListView.categories)
+                let validCategories = Set(WorldEntry.categories)
                 let category = validCategories.contains(upsert.category ?? "") ? upsert.category! : "其他"
                 let entry = WorldEntry(category: category, name: name, content: upsert.content)
                 entry.novel = novel

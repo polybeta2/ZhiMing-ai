@@ -1,25 +1,27 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#endif
 
-final class ChatThread: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var purpose: String                  // creation（立项）/ writing（写作助手）
-    @Published var createdAt: Date
+public final class ChatThread: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var purpose: String                  // creation（立项）/ writing（写作助手）
+    @Published public var createdAt: Date
     /// 完整思路立项：跳过澄清问答，进入对话直接规划卷章结构
-    @Published var skipsClarification: Bool = false
-    weak var novel: Novel?
+    @Published public var skipsClarification: Bool = false
+    public weak var novel: Novel?
 
-    @Published var messages: [ChatMessage] = []
+    @Published public var messages: [ChatMessage] = []
 
-    init(id: UUID = UUID(), purpose: String) {
+    public init(id: UUID = UUID(), purpose: String) {
         self.id = id
         self.purpose = purpose
         self.createdAt = .now
     }
 
-    enum CodingKeys: String, CodingKey { case id, purpose, createdAt, skipsClarification, messages }
+    public enum CodingKeys: String, CodingKey { case id, purpose, createdAt, skipsClarification, messages }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         purpose = try c.decode(String.self, forKey: .purpose)
@@ -28,7 +30,7 @@ final class ChatThread: Identifiable, ObservableObject, Codable {
         messages = try c.decode([ChatMessage].self, forKey: .messages)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(purpose, forKey: .purpose)
@@ -38,23 +40,23 @@ final class ChatThread: Identifiable, ObservableObject, Codable {
     }
 }
 
-final class ChatMessage: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var role: String                     // user / assistant
-    @Published var content: String
-    @Published var createdAt: Date
-    weak var thread: ChatThread?
+public final class ChatMessage: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var role: String                     // user / assistant
+    @Published public var content: String
+    @Published public var createdAt: Date
+    public weak var thread: ChatThread?
 
-    init(id: UUID = UUID(), role: String, content: String) {
+    public init(id: UUID = UUID(), role: String, content: String) {
         self.id = id
         self.role = role
         self.content = content
         self.createdAt = .now
     }
 
-    enum CodingKeys: String, CodingKey { case id, role, content, createdAt }
+    public enum CodingKeys: String, CodingKey { case id, role, content, createdAt }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         role = try c.decode(String.self, forKey: .role)
@@ -62,7 +64,7 @@ final class ChatMessage: Identifiable, ObservableObject, Codable {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(role, forKey: .role)

@@ -1,5 +1,7 @@
+#if canImport(SwiftUI)
 import SwiftUI
 import UIKit
+import ZhiMingCore
 
 /// 章节编辑器：沉浸编辑 + 底部 AI 工具条（续写 / 改写 / 润色 / 摘要 / 版本）
 /// 续写字数快捷选项 800/1500/2500；草稿经 DraftCard 采纳/重新生成/放弃
@@ -664,3 +666,4 @@ private struct SummaryEditSheet: View {
         dismiss()
     }
 }
+#endif

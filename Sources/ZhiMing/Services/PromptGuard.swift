@@ -1,5 +1,7 @@
+#if canImport(SwiftUI)
 import UIKit
 import SwiftUI
+import ZhiMingCore
 
 /// 发送前体量护栏（v1.7）：请求总字符超过 PromptLimits.requestWarnChars 时弹确认框。
 /// 刻意使用 UIKit UIAlertController 而非 SwiftUI .alert——本项目已验证部分系统版本上
@@ -43,3 +45,4 @@ enum PromptGuard {
         return top
     }
 }
+#endif

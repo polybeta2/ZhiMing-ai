@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 角色卡编辑：基础档案 + 当前状态区 + 参与近期剧情开关 + 别名列表
 struct CharacterEditView: View {
@@ -142,3 +144,4 @@ struct CharacterEditView: View {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
+#endif

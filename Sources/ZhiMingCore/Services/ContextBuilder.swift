@@ -1,18 +1,23 @@
 import Foundation
 
-struct BuiltContext {
-    let rendered: String
-    let truncatedSections: [String]      // 被预算裁掉的段落名，用于界面提示
+public struct BuiltContext {
+    public let rendered: String
+    public let truncatedSections: [String]      // 被预算裁掉的段落名，用于界面提示
+
+    public init(rendered: String, truncatedSections: [String]) {
+        self.rendered = rendered
+        self.truncatedSections = truncatedSections
+    }
 }
 
 /// 三级上下文装配（司命 context_orchestrator 的简化版）：
 /// 必需层（不参与预算裁剪）：风格约束、本章细纲、正文末尾 800 字
 /// 高优先层：最近 3 章摘要 + 关键事实
 /// 可选层（超预算时先裁）：场景角色卡（≤12）、世界观条目（≤8）
-enum ContextBuilder {
-    static let tailLength = 800
-    static let maxSceneCharacters = 12
-    static let maxWorldEntries = 8
+public enum ContextBuilder {
+    public static let tailLength = 800
+    public static let maxSceneCharacters = 12
+    public static let maxWorldEntries = 8
 
     /// 必需层兜底截断：用户可无限编辑的字段（风格约束/梗概/卷纲/细纲等）超限时保留尾部，
     /// 并记入 truncatedSections 在界面提示（尾部更贴近当前写作进度，故留尾不留头）。
@@ -25,7 +30,7 @@ enum ContextBuilder {
         return "……" + String(text.suffix(limit))
     }
 
-    static func buildContinueContext(chapter: Chapter, novel: Novel, budgetChars: Int) -> BuiltContext {
+    public static func buildContinueContext(chapter: Chapter, novel: Novel, budgetChars: Int) -> BuiltContext {
         var required: [String] = []
         var high: [(String, String)] = []
         var optional: [(String, String)] = []
@@ -134,12 +139,12 @@ enum ContextBuilder {
 // MARK: - 大纲辅助装配（卷纲 / 章细纲）
 
 /// 大纲生成的目标对象
-enum OutlineTarget {
+public enum OutlineTarget {
     case volume(Volume)
     case chapter(Chapter)
 }
 
-extension ContextBuilder {
+public extension ContextBuilder {
 
     /// 大纲上下文三级装配：
     /// 必需层：梗概/风格 + 目标现状（卷信息 或 所在卷/相邻章/本章现状）

@@ -1,5 +1,7 @@
+#if canImport(SwiftUI)
 import SwiftUI
 import UIKit
+import ZhiMingCore
 
 /// 导出作品弹窗：选择范围与格式，生成临时文件后调起分享面板
 struct ExportSheet: View {
@@ -108,3 +110,4 @@ private struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
+#endif

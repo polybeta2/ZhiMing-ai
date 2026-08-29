@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 新建作品：空白建书 / 一句话立项 两个入口
 struct NovelCreateSheet: View {
@@ -469,3 +471,4 @@ private struct TagPreviewSheet: View {
         }
     }
 }
+#endif

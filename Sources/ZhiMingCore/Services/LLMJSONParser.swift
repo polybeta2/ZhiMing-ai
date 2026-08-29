@@ -1,10 +1,10 @@
 import Foundation
 
 /// 从模型输出中提取 JSON（容忍 ```json 围栏、前后缀文字、数组/对象两种顶层结构）
-enum LLMJSONParser {
+public enum LLMJSONParser {
     /// 提取首个完整 JSON 值：`[` 开头取数组、`{` 开头取对象（取二者中更早出现者），
     /// 做字符串感知的括号配平，杜绝把 `[{...},{...}]` 截成 `{...},{...}` 的非法片段
-    static func extractJSONObject(from text: String) -> String? {
+    public static func extractJSONObject(from text: String) -> String? {
         guard let start = text.firstIndex(where: { $0 == "{" || $0 == "[" }) else { return nil }
         let open = text[start]
         let close: Character = open == "{" ? "}" : "]"
@@ -32,7 +32,7 @@ enum LLMJSONParser {
         return nil   // 未闭合（多半被 maxTokens 截断），交给上层报错
     }
 
-    static func decode<T: Decodable>(_ type: T.Type, fromJSONObjectIn text: String) -> T? {
+    public static func decode<T: Decodable>(_ type: T.Type, fromJSONObjectIn text: String) -> T? {
         guard let json = extractJSONObject(from: text),
               let data = json.data(using: .utf8),
               let value = try? JSONDecoder().decode(T.self, from: data) else {
@@ -63,17 +63,30 @@ enum LLMJSONParser {
     }
 
     /// 摘要中提取出的单条新伏笔（字段对应 summarize 模板）
-    struct ForeshadowExtraction: Decodable {
-        let title: String?
-        let detail: String?
-        let planned_resolve: String?
+    public struct ForeshadowExtraction: Decodable {
+        public let title: String?
+        public let detail: String?
+        public let planned_resolve: String?
+
+        public init(title: String? = nil, detail: String? = nil, planned_resolve: String? = nil) {
+            self.title = title
+            self.detail = detail
+            self.planned_resolve = planned_resolve
+        }
     }
 
     /// 摘要解析结构（字段与 summarize 模板对应）
-    struct SummaryResult: Decodable {
-        let summary: String
-        let key_facts: [String]?
-        let new_foreshadowings: [ForeshadowExtraction]?
-        let resolved_foreshadowing_titles: [String]?
+    public struct SummaryResult: Decodable {
+        public let summary: String
+        public let key_facts: [String]?
+        public let new_foreshadowings: [ForeshadowExtraction]?
+        public let resolved_foreshadowing_titles: [String]?
+
+        public init(summary: String, key_facts: [String]? = nil, new_foreshadowings: [ForeshadowExtraction]? = nil, resolved_foreshadowing_titles: [String]? = nil) {
+            self.summary = summary
+            self.key_facts = key_facts
+            self.new_foreshadowings = new_foreshadowings
+            self.resolved_foreshadowing_titles = resolved_foreshadowing_titles
+        }
     }
 }

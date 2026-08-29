@@ -1,3 +1,4 @@
+#if os(iOS) || os(macOS)
 import Foundation
 import Security
 
@@ -42,3 +43,4 @@ enum KeychainHelper {
         return status == errSecSuccess || status == errSecItemNotFound
     }
 }
+#endif

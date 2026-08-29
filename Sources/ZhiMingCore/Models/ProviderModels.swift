@@ -1,19 +1,21 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#endif
 
-final class ProviderConfig: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var name: String
-    @Published var baseUrl: String                  // 如 https://api.openai.com/v1
-    @Published var apiKeyID: String                 // Keychain 账户键（不存明文）
-    @Published var modelName: String
-    @Published var temperature: Double
-    @Published var maxTokens: Int                   // 输出预留
-    @Published var contextBudgetChars: Int          // 输入上下文字符预算
-    @Published var systemPromptExtra: String?       // 用户附加系统指令
-    @Published var isDefault: Bool
+public final class ProviderConfig: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var name: String
+    @Published public var baseUrl: String                  // 如 https://api.openai.com/v1
+    @Published public var apiKeyID: String                 // Keychain 账户键（不存明文）
+    @Published public var modelName: String
+    @Published public var temperature: Double
+    @Published public var maxTokens: Int                   // 输出预留
+    @Published public var contextBudgetChars: Int          // 输入上下文字符预算
+    @Published public var systemPromptExtra: String?       // 用户附加系统指令
+    @Published public var isDefault: Bool
 
-    init(id: UUID = UUID(), name: String, baseUrl: String, modelName: String) {
+    public init(id: UUID = UUID(), name: String, baseUrl: String, modelName: String) {
         self.id = id
         self.name = name
         self.baseUrl = baseUrl
@@ -25,12 +27,12 @@ final class ProviderConfig: Identifiable, ObservableObject, Codable {
         self.isDefault = false
     }
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id, name, baseUrl, apiKeyID, modelName, temperature
         case maxTokens, contextBudgetChars, systemPromptExtra, isDefault
     }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
@@ -48,7 +50,7 @@ final class ProviderConfig: Identifiable, ObservableObject, Codable {
         contextBudgetChars = decodedBudget == 12000 ? 60000 : decodedBudget
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)

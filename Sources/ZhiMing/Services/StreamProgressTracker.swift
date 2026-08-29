@@ -1,5 +1,7 @@
+#if os(iOS) || os(macOS)
 import Foundation
 import Combine
+import ZhiMingCore
 
 /// 流式生成进度跟踪：等待首Token → 深度思考 → 输出中
 /// 供 UI 展示「正在等待首Token Xs / 深度思考 X字 Xs / 正在输出 X字 Xs」
@@ -57,3 +59,4 @@ final class StreamProgressTracker: ObservableObject {
         }
     }
 }
+#endif

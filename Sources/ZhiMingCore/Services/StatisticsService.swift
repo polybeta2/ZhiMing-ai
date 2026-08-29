@@ -1,16 +1,16 @@
 import Foundation
 
 /// 小说统计结果
-struct NovelStatistics {
-    let totalWordCount: Int            // 全书总字数
-    let todayWordCount: Int            // 今日新增字数
-    let completedChapters: Int         // 完成章数（≥1000 字）
-    let draftChapters: Int             // 草稿章数（>0 字）
-    let emptyChapters: Int             // 空章节数（0 字）
-    let averageChapterWords: Int       // 平均每章字数
-    let chapterWordCounts: [(title: String, wordCount: Int)]  // 各章字数（按卷章序）
+public struct NovelStatistics {
+    public let totalWordCount: Int            // 全书总字数
+    public let todayWordCount: Int            // 今日新增字数
+    public let completedChapters: Int         // 完成章数（≥1000 字）
+    public let draftChapters: Int             // 草稿章数（>0 字）
+    public let emptyChapters: Int             // 空章节数（0 字）
+    public let averageChapterWords: Int       // 平均每章字数
+    public let chapterWordCounts: [(title: String, wordCount: Int)]  // 各章字数（按卷章序）
 
-    static let empty = NovelStatistics(
+    public static let empty = NovelStatistics(
         totalWordCount: 0, todayWordCount: 0, completedChapters: 0,
         draftChapters: 0, emptyChapters: 0, averageChapterWords: 0,
         chapterWordCounts: []
@@ -18,12 +18,12 @@ struct NovelStatistics {
 }
 
 /// 小说统计服务
-enum StatisticsService {
+public enum StatisticsService {
 
     /// 判定「完成」的字数阈值
-    static let completedThreshold = 1000
+    public static let completedThreshold = 1000
 
-    static func calculate(for novel: Novel) -> NovelStatistics {
+    public static func calculate(for novel: Novel) -> NovelStatistics {
         var total = 0
         var completed = 0
         var draft = 0
@@ -65,7 +65,7 @@ enum StatisticsService {
     }
 
     /// 若非今日则更新每日基线，返回是否已更新
-    static func updateDailyBaseline(for novel: Novel) -> Bool {
+    public static func updateDailyBaseline(for novel: Novel) -> Bool {
         let today = Calendar.current.startOfDay(for: Date())
         if let date = novel.lastStatsDate,
            Calendar.current.isDate(date, inSameDayAs: Date()) {

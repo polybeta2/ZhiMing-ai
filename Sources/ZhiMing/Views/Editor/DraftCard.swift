@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// AI 草稿卡片：实时流式展示全文；底部三按钮 采纳并入正文 / 重新生成 / 放弃
@@ -88,3 +89,4 @@ struct DraftCard: View {
         .padding(.horizontal, AppTheme.spacing[2])
     }
 }
+#endif

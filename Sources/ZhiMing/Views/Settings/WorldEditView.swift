@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 世界观条目编辑：分类 + 名称 + 内容
 struct WorldEditView: View {
@@ -66,3 +68,4 @@ struct WorldEditView: View {
         dismiss()
     }
 }
+#endif

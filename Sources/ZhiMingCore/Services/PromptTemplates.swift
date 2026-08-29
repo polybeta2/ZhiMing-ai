@@ -4,9 +4,9 @@ import Foundation
 /// 占位符经 PromptLibrary.render 替换；编辑立即生效，无需重启。
 /// 全部调用方均在主线程上下文（@MainActor VM / SwiftUI 视图），故整体标注 MainActor。
 @MainActor
-enum PromptTemplates {
+public enum PromptTemplates {
 
-    static func continueWriting(context: BuiltContext, wordTarget: Int, extra: String?) -> [LLMMessage] {
+    public static func continueWriting(context: BuiltContext, wordTarget: Int, extra: String?) -> [LLMMessage] {
         let system = PromptLibrary.shared.resolvedText(for: PromptID.continueWriting)
         let user = """
         \(context.rendered)
@@ -17,7 +17,7 @@ enum PromptTemplates {
     }
 
     /// 从零撰写整章（章节正文为空时）
-    static func writing(context: BuiltContext, wordTarget: Int, extra: String?) -> [LLMMessage] {
+    public static func writing(context: BuiltContext, wordTarget: Int, extra: String?) -> [LLMMessage] {
         let system = PromptLibrary.shared.resolvedText(for: PromptID.writing)
         let user = """
         \(context.rendered)
@@ -27,7 +27,7 @@ enum PromptTemplates {
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
-    static func rewrite(mode: String, selection: String, instruction: String?) -> [LLMMessage] {
+    public static func rewrite(mode: String, selection: String, instruction: String?) -> [LLMMessage] {
         // 「去AI味」走专属模板；其余模式共用通用改写模板
         let system: String
         if mode == "去AI味" {
@@ -46,7 +46,7 @@ enum PromptTemplates {
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
-    static func summarize(content: String, title: String) -> [LLMMessage] {
+    public static func summarize(content: String, title: String) -> [LLMMessage] {
         let system = PromptLibrary.shared.resolvedText(for: PromptID.summarize)
         return [.init(role: .system, content: system),
                 .init(role: .user, content: "【\(title)】\n\(content)")]
@@ -55,7 +55,7 @@ enum PromptTemplates {
     // MARK: 分阶段立项
 
     /// supplement：R18 规范等补充约束，拼接在系统提示词之后、用户输入之前。
-    static func creationClarify(brief: String, qaHistory: String, supplement: String?) -> [LLMMessage] {
+    public static func creationClarify(brief: String, qaHistory: String, supplement: String?) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationClarify)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -69,7 +69,7 @@ enum PromptTemplates {
     }
 
     /// feedback：结构提案阶段的修改意见（nil = 首次规划）
-    static func creationStructure(brief: String, qaHistory: String, feedback: String?, supplement: String?) -> [LLMMessage] {
+    public static func creationStructure(brief: String, qaHistory: String, feedback: String?, supplement: String?) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationStructure)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -86,7 +86,7 @@ enum PromptTemplates {
     }
 
     /// structureJSON：用户已确认的卷章结构；feedback：基础蓝图阶段的修改意见（重生成用）
-    static func creationFoundation(brief: String, qaHistory: String, structureJSON: String,
+    public static func creationFoundation(brief: String, qaHistory: String, structureJSON: String,
                                    feedback: String?, supplement: String?) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationFoundation)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -108,7 +108,7 @@ enum PromptTemplates {
     }
 
     /// 卷纲批次：只为 targets 中的卷生成卷纲（每批 1~5 卷）
-    static func creationVolumeBatch(context: String, targets: [String], supplement: String?) -> [LLMMessage] {
+    public static func creationVolumeBatch(context: String, targets: [String], supplement: String?) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationVolumeBatch)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -126,7 +126,7 @@ enum PromptTemplates {
     }
 
     /// 章节标题批次：为一卷生成全部章节标题
-    static func creationChapterNames(context: String, supplement: String?) -> [LLMMessage] {
+    public static func creationChapterNames(context: String, supplement: String?) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationChapterNames)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -142,7 +142,7 @@ enum PromptTemplates {
     }
 
     /// 细纲批次：只为 targets 中的章节生成细纲
-    static func creationChapterBatch(context: String, targets: [String], supplement: String?) -> [LLMMessage] {
+    public static func creationChapterBatch(context: String, targets: [String], supplement: String?) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationChapterBatch)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -160,7 +160,7 @@ enum PromptTemplates {
     }
 
     /// supplement：R18 规范等补充约束，拼接在系统提示词之后、用户输入之前。
-    static func creationRevise(blueprintJSON: String, feedback: String, supplement: String? = nil) -> [LLMMessage] {
+    public static func creationRevise(blueprintJSON: String, feedback: String, supplement: String? = nil) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationRevise)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -178,7 +178,7 @@ enum PromptTemplates {
 
     /// 写作助手系统提示词：{title} 占位符 + 梗概/风格约束条件追加（保持原语义）。
     /// 梗概/风格为用户可无限编辑字段，超长时保留尾部（v1.7 必需层兜底）。
-    static func writingAssistantSystem(title: String, synopsis: String, styleGuide: String?) -> String {
+    public static func writingAssistantSystem(title: String, synopsis: String, styleGuide: String?) -> String {
         let template = PromptLibrary.shared.resolvedText(for: PromptID.writingAssistant)
         var system = PromptLibrary.render(template, values: ["title": title])
         let cappedSynopsis = tailCapped(synopsis)
@@ -200,14 +200,14 @@ enum PromptTemplates {
 
     /// 动态注入（R18 规范 / 标签补充 / 读写协议 / 提供商附加指令）先占用输入预算，
     /// 剩余额度才交给 ContextBuilder 装配上下文；扣穿则为 0（必需层仍会发送，可选层全裁）。
-    static func adjustedInputBudget(base: Int, injections: String?...) -> Int {
+    public static func adjustedInputBudget(base: Int, injections: String?...) -> Int {
         let used = injections.reduce(0) { $0 + ($1?.count ?? 0) }
         return max(0, base - used)
     }
 
     /// 把提供商的「附加系统指令」（ProviderConfig.systemPromptExtra）并入消息：
     /// 首条为 system 时拼接在其后，否则插入为新的首条 system；空/空白指令原样返回。
-    static func applying(providerExtra extra: String?, to messages: [LLMMessage]) -> [LLMMessage] {
+    public static func applying(providerExtra extra: String?, to messages: [LLMMessage]) -> [LLMMessage] {
         guard let trimmed = extra?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return messages
         }
@@ -222,7 +222,7 @@ enum PromptTemplates {
 
     /// 大纲生成（卷纲/章细纲共用装配）：系统模板按 PromptID 解析（自动支持开发者覆盖），
     /// 用户侧为装配上下文 + 可选附加要求；上下文为空时给出兜底说明。
-    static func outline(systemID: String, context: BuiltContext, instruction: String?) -> [LLMMessage] {
+    public static func outline(systemID: String, context: BuiltContext, instruction: String?) -> [LLMMessage] {
         let system = PromptLibrary.shared.resolvedText(for: systemID)
         var user = context.rendered.isEmpty ? "（暂无可用背景信息，请基于常识规划）" : context.rendered
         if let extra = instruction?.trimmingCharacters(in: .whitespacesAndNewlines), !extra.isEmpty {

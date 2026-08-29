@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 提供商卡片列表（对标 Kelivo 会话列表卡片行）
 struct ProviderListView: View {
@@ -121,3 +123,4 @@ private struct ProviderRow: View {
         .contentShape(Rectangle())
     }
 }
+#endif

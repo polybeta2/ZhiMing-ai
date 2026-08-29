@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 通用聊天页（立项与写作助手共用）
 /// 立项：分阶段共创（澄清提问 → 结构提案 → 基础蓝图 → 细纲分批 → 创建作品）
@@ -790,3 +792,4 @@ private struct PatchProposalCard: View {
         .zmCard(cornerRadius: AppTheme.radiusCard)
     }
 }
+#endif

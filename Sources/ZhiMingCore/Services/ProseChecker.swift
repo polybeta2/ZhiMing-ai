@@ -3,12 +3,12 @@ import Foundation
 /// 本地「文风快检」：纯文本统计，零 LLM 成本，为「去 AI 味」改写提供问题清单。
 /// 铁律与上游方法论一致：只报告、不改正文；警告仅供提示，不作硬门槛。
 /// 检测规则为本项目自行编写（分级思想参考 awesome-novel-agent 的做法，措辞未复制其文本）。
-enum ProseChecker {
+public enum ProseChecker {
 
-    struct Issue: Identifiable, Equatable {
-        let id = UUID()
-        let rule: String        // 规则名
-        let detail: String      // 命中情况说明
+    public struct Issue: Identifiable, Equatable {
+        public let id = UUID()
+        public let rule: String        // 规则名
+        public let detail: String      // 命中情况说明
     }
 
     // MARK: 检测配置（自写词表，可按需扩充）
@@ -41,11 +41,11 @@ enum ProseChecker {
     // MARK: 主入口
 
     /// 返回问题清单（每条一行可读文本）；无命中返回空数组。
-    static func reportLines(in text: String, maxLines: Int = 8) -> [String] {
+    public static func reportLines(in text: String, maxLines: Int = 8) -> [String] {
         check(text).prefix(maxLines).map { "- \($0.rule)：\($0.detail)" }
     }
 
-    static func check(_ text: String) -> [Issue] {
+    public static func check(_ text: String) -> [Issue] {
         var issues: [Issue] = []
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 60 else { return issues }   // 过短样本不做统计

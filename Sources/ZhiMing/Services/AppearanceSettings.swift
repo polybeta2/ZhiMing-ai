@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 import UIKit
 
@@ -46,3 +47,4 @@ enum KeepAwake {
         UIApplication.shared.isIdleTimerDisabled = on
     }
 }
+#endif

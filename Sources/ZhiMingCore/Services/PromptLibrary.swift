@@ -1,80 +1,95 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#endif
 
 // MARK: - 提示词体量护栏常量（v1.7 全项目统一引用）
 
 /// 所有上限均为「字符数」。集中定义便于调参与审计。
 /// 超限行为：开发者输入保存时截断 / 标签注入熔断跳过 / 必需层字段留尾截断 / 超大请求发送前确认。
-enum PromptLimits {
+public enum PromptLimits {
     /// 单条提示词覆盖文本、提供商附加系统指令的硬上限（保存时截断）
-    static let maxOverrideChars = 20_000
+    public static let maxOverrideChars = 20_000
     /// 单个示例标签 presetText 的硬上限（保存时截断）
-    static let maxTagPresetChars = 20_000
+    public static let maxTagPresetChars = 20_000
     /// 「标签智能注入」单次请求的合计熔断线（超出部分跳过并附提示）
-    static let matchedSupplementCap = 8_000
+    public static let matchedSupplementCap = 8_000
     /// R18 特化模块单次请求的合计字符预算（小模块优先装填）
-    static let r18ModuleCharBudget = 12_000
+    public static let r18ModuleCharBudget = 12_000
     /// 必需层字段（风格约束/梗概/卷纲/细纲等）的兜底截断线（保留尾部）
-    static let requiredFieldCap = 4_000
+    public static let requiredFieldCap = 4_000
     /// 写作助手聊天历史的单条消息截断线
-    static let historyMessageCap = 2_000
+    public static let historyMessageCap = 2_000
     /// 发送前总字符告警线：超过则弹确认框（PromptGuard）
-    static let requestWarnChars = 80_000
+    public static let requestWarnChars = 80_000
     /// 伏笔提醒触发阈值：埋设距今超过 N 章即提醒
-    static let foreshadowReminderChapterThreshold = 8
+    public static let foreshadowReminderChapterThreshold = 8
     /// 未回收伏笔提醒整段字符上限（可选层，硬裁尾）
-    static let foreshadowReminderCap = 2_000
+    public static let foreshadowReminderCap = 2_000
     /// 伏笔字段（标题/详情/备注/计划回收）保存时截断线
-    static let foreshadowTextFieldCap = 2_000
+    public static let foreshadowTextFieldCap = 2_000
 }
 
 // MARK: - 示例标签数据模型（一句话立项增强）
 
 /// 单个示例标签：用户「启用」且输入命中关键词时，presetText 注入蓝图生成的系统提示词
-struct PromptTag: Codable, Identifiable, Equatable {
-    var id: String
-    var name: String
-    var keywords: [String]      // 触发注入的关键词（含标签名本身）
-    var presetText: String      // 完整预设提示词内容（可在开发者功能中编辑）
+public struct PromptTag: Codable, Identifiable, Equatable {
+    public var id: String
+    public var name: String
+    public var keywords: [String]      // 触发注入的关键词（含标签名本身）
+    public var presetText: String      // 完整预设提示词内容（可在开发者功能中编辑）
+
+    public init(id: String, name: String, keywords: [String], presetText: String) {
+        self.id = id
+        self.name = name
+        self.keywords = keywords
+        self.presetText = presetText
+    }
 }
 
-struct PromptTagCategory: Codable, Identifiable, Equatable {
-    var id: String
-    var name: String            // 小说类型 / 内容流派 / 风格基调
-    var tags: [PromptTag]
+public struct PromptTagCategory: Codable, Identifiable, Equatable {
+    public var id: String
+    public var name: String            // 小说类型 / 内容流派 / 风格基调
+    public var tags: [PromptTag]
+
+    public init(id: String, name: String, tags: [PromptTag]) {
+        self.id = id
+        self.name = name
+        self.tags = tags
+    }
 }
 
 // MARK: - 内置提示词条目
 
-struct BuiltInPrompt: Identifiable {
-    let id: String
-    let name: String            // 展示名
-    let category: String        // 分类（写作 / 立项 / 档案 / 助手）
-    let placeholders: [String]  // 模板占位符说明
-    let defaultText: String     // 出厂默认文本（不落盘，仅作回退）
+public struct BuiltInPrompt: Identifiable {
+    public let id: String
+    public let name: String            // 展示名
+    public let category: String        // 分类（写作 / 立项 / 档案 / 助手）
+    public let placeholders: [String]  // 模板占位符说明
+    public let defaultText: String     // 出厂默认文本（不落盘，仅作回退）
 }
 
 /// 稳定的提示词 ID 常量
-enum PromptID {
-    static let continueWriting = "prompt.continue.system"
-    static let writing = "prompt.writing.system"
-    static let rewrite = "prompt.rewrite.system"
-    static let summarize = "prompt.summarize.system"
-    static let creationClarify = "prompt.creation.clarify.system"
-    static let creationStructure = "prompt.creation.structure.system"
-    static let creationFoundation = "prompt.creation.foundation.system"
-    static let creationVolumeBatch = "prompt.creation.volume.batch.system"
-    static let creationChapterBatch = "prompt.creation.chapter.batch.system"
-    static let creationRevise = "prompt.creation.revise.system"
-    static let creationChapterNames = "prompt.creation.chapter.names.system"
-    static let writingAssistant = "prompt.assistant.system"
-    static let assistantReadWrite = "prompt.assistant.rw.protocol"
-    static let antiAIFlavor = "prompt.antiai.system"
-    static let volumeOutline = "prompt.volume.outline.system"
-    static let chapterOutline = "prompt.chapter.outline.system"
-    static let chapterBatchOutline = "prompt.chapter.batch.outline.system"
-    static let r18zh = "prompt.r18.system.zh"
-    static let r18en = "prompt.r18.system.en"
+public enum PromptID {
+    public static let continueWriting = "prompt.continue.system"
+    public static let writing = "prompt.writing.system"
+    public static let rewrite = "prompt.rewrite.system"
+    public static let summarize = "prompt.summarize.system"
+    public static let creationClarify = "prompt.creation.clarify.system"
+    public static let creationStructure = "prompt.creation.structure.system"
+    public static let creationFoundation = "prompt.creation.foundation.system"
+    public static let creationVolumeBatch = "prompt.creation.volume.batch.system"
+    public static let creationChapterBatch = "prompt.creation.chapter.batch.system"
+    public static let creationRevise = "prompt.creation.revise.system"
+    public static let creationChapterNames = "prompt.creation.chapter.names.system"
+    public static let writingAssistant = "prompt.assistant.system"
+    public static let assistantReadWrite = "prompt.assistant.rw.protocol"
+    public static let antiAIFlavor = "prompt.antiai.system"
+    public static let volumeOutline = "prompt.volume.outline.system"
+    public static let chapterOutline = "prompt.chapter.outline.system"
+    public static let chapterBatchOutline = "prompt.chapter.batch.outline.system"
+    public static let r18zh = "prompt.r18.system.zh"
+    public static let r18en = "prompt.r18.system.en"
 }
 
 // MARK: - 提示词与标签库（全局单例）
@@ -84,16 +99,16 @@ enum PromptID {
 /// 2. 一句话立项的示例标签库（分类 / 关键词 / 完整预设内容），支持开发者增删改。
 /// 持久化：Application Support/ZhiMing/prompts.json（原子写入，独立于 library.json）。
 @MainActor
-final class PromptLibrary: ObservableObject {
-    static let shared = PromptLibrary()
+public final class PromptLibrary: ObservableObject {
+    public static let shared = PromptLibrary()
 
     /// 提示词覆盖表：id -> 用户自定义文本；为空表示使用出厂默认
-    @Published private(set) var overrides: [String: String] = [:]
+    @Published public private(set) var overrides: [String: String] = [:]
     /// 示例标签库（三类，可扩展）
-    @Published var tagCategories: [PromptTagCategory] = []
+    @Published public var tagCategories: [PromptTagCategory] = []
 
     /// 全部内置提示词清单（开发者功能列表数据源）
-    let builtInPrompts: [BuiltInPrompt]
+    public let builtInPrompts: [BuiltInPrompt]
 
     private struct Document: Codable {
         var version: Int = 1
@@ -101,7 +116,7 @@ final class PromptLibrary: ObservableObject {
         var tagCategories: [PromptTagCategory]
     }
 
-    static var fileURL: URL {
+    public static var fileURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let dir = base.appendingPathComponent("ZhiMing", isDirectory: true)
@@ -110,7 +125,7 @@ final class PromptLibrary: ObservableObject {
     }
 
     /// 备份文件（单代，随每次保存同步刷新）
-    static var backupURL: URL {
+    public static var backupURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let dir = base.appendingPathComponent("ZhiMing", isDirectory: true)
@@ -146,7 +161,7 @@ final class PromptLibrary: ObservableObject {
     }
 
     /// 原子保存 + 同步刷新备份（文件小，双写成本可忽略）；提示词库属低危数据，失败不打断创作流
-    func save() {
+    public func save() {
         let doc = Document(overrides: overrides, tagCategories: tagCategories)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -162,16 +177,16 @@ final class PromptLibrary: ObservableObject {
     // MARK: 提示词读取与覆盖
 
     /// 当前生效文本：用户覆盖优先，否则出厂默认
-    func resolvedText(for id: String) -> String {
+    public func resolvedText(for id: String) -> String {
         guard let prompt = builtInPrompts.first(where: { $0.id == id }) else { return "" }
         return overrides[id] ?? prompt.defaultText
     }
 
-    func isCustomized(_ id: String) -> Bool { overrides[id] != nil }
+    public func isCustomized(_ id: String) -> Bool { overrides[id] != nil }
 
     /// 保存覆盖；若与出厂默认一致则移除覆盖（保持文档干净）。
     /// 硬上限：超长文本截断到 maxOverrideChars——覆盖文本会原样进每次请求，必须封顶。
-    func setOverride(_ id: String, text: String) {
+    public func setOverride(_ id: String, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let prompt = builtInPrompts.first(where: { $0.id == id }),
            trimmed == prompt.defaultText.trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -183,13 +198,13 @@ final class PromptLibrary: ObservableObject {
     }
 
     /// 恢复出厂默认
-    func resetOverride(_ id: String) {
+    public func resetOverride(_ id: String) {
         overrides.removeValue(forKey: id)
         save()
     }
 
     /// 占位符替换：模板中的 {key} 替换为对应值；未提供的占位符替换为空串
-    static func render(_ template: String, values: [String: String]) -> String {
+    public static func render(_ template: String, values: [String: String]) -> String {
         var out = template
         // 先收集模板里实际出现的占位符键，避免遗漏清理
         let known = ["mode", "title", "synopsis", "styleGuide"]
@@ -207,7 +222,7 @@ final class PromptLibrary: ObservableObject {
     /// 未启用 → 绝不注入；全部未启用或无一命中 → 返回 nil（只发原始输入）。
     /// 熔断：命中内容合计超过 matchedSupplementCap 时跳过放不下的条目并附提示，
     /// 防止「大量启用标签 + 输入凑齐全部关键词」把 system 撑到 MB 级。
-    func matchedSupplement(enabledIDs: [String], input: String) -> String? {
+    public func matchedSupplement(enabledIDs: [String], input: String) -> String? {
         guard !enabledIDs.isEmpty, !input.isEmpty else { return nil }
         var lines: [String] = []
         var used = 0
@@ -240,7 +255,7 @@ final class PromptLibrary: ObservableObject {
     /// 输入语言检测："zh" / "en"。
     /// 统计 CJK 表意字符与拉丁字母占比；完全无文字时默认中文（应用主语言）；
     /// 占比相同（中英混合平局）时按最后一句的构成判定。
-    static func detectLanguage(_ text: String) -> String {
+    public static func detectLanguage(_ text: String) -> String {
         var cjk = 0, latin = 0
         for scalar in text.unicodeScalars {
             let v = scalar.value
@@ -265,26 +280,33 @@ final class PromptLibrary: ObservableObject {
         return cjk > latin ? "zh" : "en"
     }
 
-    /// R18 增强的资源查找：SwiftPM 资源在 iOS 上位于 ZhiMing_ZhiMing.bundle，
-    /// 查不到时回退 Bundle.main（兼容 macOS / 预览）。
+    /// R18 增强的资源查找：资源包随 target 拆分改名（ZhiMing_ZhiMingCore），旧名兜底；
+    /// Apple 平台最终回退主包（找不到时 R18 走出厂精简版，不崩溃），
+    /// Linux swift test 走 Bundle.module（指向资源目录本身）。
     private static let skillPackRoot: Bundle = {
-        if let url = Bundle.main.url(forResource: "ZhiMing_ZhiMing", withExtension: "bundle"),
-           let inner = Bundle(url: url) {
-            return inner
+        for name in ["ZhiMing_ZhiMingCore", "ZhiMing_ZhiMing"] {
+            if let url = Bundle.main.url(forResource: name, withExtension: "bundle"),
+               let inner = Bundle(url: url) {
+                return inner
+            }
         }
+        #if canImport(UIKit)
         return Bundle.main
+        #else
+        return Bundle.module
+        #endif
     }()
 
     // MARK: - fictional-erotica 模块路由（核心常驻 + 特化模块按需加载）
 
     /// 特化模块路由表：命中任一关键词才把该模块注入本次请求（对应上游 progressive disclosure）
-    struct R18ModuleRoute {
+    public struct R18ModuleRoute {
         let file: String          // SkillPacks 内文件名（不含扩展名）
         let title: String         // 注入时的分节标题
         let keywords: [String]    // 中英混合关键词，小写匹配
     }
 
-    static let r18ModuleRoutes: [R18ModuleRoute] = [
+    public static let r18ModuleRoutes: [R18ModuleRoute] = [
         R18ModuleRoute(file: "craft-controls", title: "技法控制台（高级场景构建/修订）",
             keywords: ["console", "控制台", "多阶段", "长镜头", "反复修改", "打磨", "修订", "节奏敏感"]),
         R18ModuleRoute(file: "persona-and-continuity", title: "人设与跨场景连续性",
@@ -309,7 +331,7 @@ final class PromptLibrary: ObservableObject {
     private static let moduleCharBudget = PromptLimits.r18ModuleCharBudget
 
     /// 读取本地包内单个模块文件（零网络依赖）。language: "zh"/"en"
-    static func bundledSkillFile(_ name: String, language: String) -> String? {
+    public static func bundledSkillFile(_ name: String, language: String) -> String? {
         guard let url = skillPackRoot.url(
             forResource: name,
             withExtension: "md",
@@ -323,7 +345,7 @@ final class PromptLibrary: ObservableObject {
     /// 核心（SKILL.md 契约）常驻，其后按关键词命中的特化模块在字符预算内装填。
     /// 优先级：开发者覆盖文本 > 本地打包 Skill > 出厂精简版。
     /// 调用方负责先判断 novel.r18Enabled。
-    func r18Supplement(forInput input: String) -> String {
+    public func r18Supplement(forInput input: String) -> String {
         let lang = Self.detectLanguage(input)
         let id = lang == "en" ? PromptID.r18en : PromptID.r18zh
         if let override = overrides[id],
@@ -371,7 +393,7 @@ final class PromptLibrary: ObservableObject {
 
     // MARK: 标签库维护（开发者功能）
 
-    func upsertTag(_ tag: PromptTag, categoryId: String) {
+    public func upsertTag(_ tag: PromptTag, categoryId: String) {
         var tag = tag
         // 硬上限：presetText 会整段注入蓝图 system，必须封顶（保存时截断）
         if tag.presetText.count > PromptLimits.maxTagPresetChars {
@@ -386,7 +408,7 @@ final class PromptLibrary: ObservableObject {
         save()
     }
 
-    func deleteTag(_ tag: PromptTag, categoryId: String) {
+    public func deleteTag(_ tag: PromptTag, categoryId: String) {
         guard let index = tagCategories.firstIndex(where: { $0.id == categoryId }) else { return }
         tagCategories[index].tags.removeAll { $0.id == tag.id }
         save()
@@ -736,7 +758,7 @@ final class PromptLibrary: ObservableObject {
     }
 
     /// 三类十五个初始示例标签（开发者可在应用内增删改）
-    static func defaultTagCategories() -> [PromptTagCategory] {
+    public static func defaultTagCategories() -> [PromptTagCategory] {
         [
             PromptTagCategory(id: "cat.genre", name: "小说类型", tags: [
                 PromptTag(id: "tag.lightnovel", name: "轻小说", keywords: ["轻小说"], presetText:

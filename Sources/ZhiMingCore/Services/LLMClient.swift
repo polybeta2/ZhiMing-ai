@@ -1,22 +1,32 @@
 import Foundation
 
-struct LLMMessage: Hashable {
-    enum Role: String { case system, user, assistant }
-    let role: Role
-    let content: String
+public struct LLMMessage: Hashable {
+    public enum Role: String { case system, user, assistant }
+    public let role: Role
+    public let content: String
+
+    public init(role: Role, content: String) {
+        self.role = role
+        self.content = content
+    }
 }
 
-struct GenerationConfig {
-    var temperature: Double
-    var maxTokens: Int
+public struct GenerationConfig {
+    public var temperature: Double
+    public var maxTokens: Int
+
+    public init(temperature: Double, maxTokens: Int) {
+        self.temperature = temperature
+        self.maxTokens = maxTokens
+    }
 }
 
-enum LLMError: LocalizedError {
+public enum LLMError: LocalizedError {
     case invalidURL
     case httpStatus(Int, String)
     case decoding(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .invalidURL: return "接口地址无效"
         // 先脱敏再截断：部分网关会把 Authorization 回显进错误页
@@ -34,17 +44,17 @@ enum LLMError: LocalizedError {
 }
 
 /// 流式事件：思维链（reasoning_content）与正文分开通道
-enum StreamEvent {
+public enum StreamEvent {
     case reasoning(String)
     case content(String)
 }
 
-protocol LLMClient {
+public protocol LLMClient {
     func streamChat(messages: [LLMMessage], config: GenerationConfig) -> AsyncThrowingStream<StreamEvent, Error>
     func testConnection() async throws -> String
 }
 
-extension Array where Element == LLMMessage {
+public extension Array where Element == LLMMessage {
     /// 全部消息 content 的字符总数（体量护栏与预算扣减共用）
     var totalContentChars: Int { reduce(0) { $0 + $1.content.count } }
 }

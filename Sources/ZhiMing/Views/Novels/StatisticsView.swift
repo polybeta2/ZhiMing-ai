@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 作品统计页：总字数 / 今日新增 / 章节进度 / 各章字数分布
 struct StatisticsView: View {
@@ -206,3 +208,4 @@ private struct ChapterBarRow: View {
         }
     }
 }
+#endif

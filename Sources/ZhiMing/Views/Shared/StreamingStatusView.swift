@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// 流式生成状态行：等待首Token / 深度思考（不显示思维链原文）/ 正在输出
@@ -43,3 +44,4 @@ extension StreamProgressTracker {
     /// 一位小数的阶段耗时
     var elapsedString: String { String(format: "%.1f", elapsed) }
 }
+#endif

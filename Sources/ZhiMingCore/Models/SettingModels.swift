@@ -1,35 +1,37 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#endif
 
-final class CharacterCard: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var name: String
-    @Published var aliases: [String]
-    @Published var appearance: String?
-    @Published var personality: String?
-    @Published var background: String?
-    @Published var currentGoal: String?
-    @Published var currentLocation: String?
-    @Published var physicalState: String?
-    @Published var mentalState: String?
-    @Published var lastSeenChapterTitle: String?
-    @Published var isSceneRelevant: Bool            // 是否参与近期剧情（续写时优先进上下文）
-    weak var novel: Novel?
+public final class CharacterCard: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var name: String
+    @Published public var aliases: [String]
+    @Published public var appearance: String?
+    @Published public var personality: String?
+    @Published public var background: String?
+    @Published public var currentGoal: String?
+    @Published public var currentLocation: String?
+    @Published public var physicalState: String?
+    @Published public var mentalState: String?
+    @Published public var lastSeenChapterTitle: String?
+    @Published public var isSceneRelevant: Bool            // 是否参与近期剧情（续写时优先进上下文）
+    public weak var novel: Novel?
 
-    init(id: UUID = UUID(), name: String) {
+    public init(id: UUID = UUID(), name: String) {
         self.id = id
         self.name = name
         self.aliases = []
         self.isSceneRelevant = true
     }
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id, name, aliases, appearance, personality, background
         case currentGoal, currentLocation, physicalState, mentalState
         case lastSeenChapterTitle, isSceneRelevant
     }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
@@ -45,7 +47,7 @@ final class CharacterCard: Identifiable, ObservableObject, Codable {
         isSceneRelevant = try c.decode(Bool.self, forKey: .isSceneRelevant)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
@@ -62,23 +64,26 @@ final class CharacterCard: Identifiable, ObservableObject, Codable {
     }
 }
 
-final class WorldEntry: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var category: String                 // 地点 / 势力 / 规则 / 物品 / 其他
-    @Published var name: String
-    @Published var content: String
-    weak var novel: Novel?
+public final class WorldEntry: Identifiable, ObservableObject, Codable {
+    /// 世界观分类全集。原在 WorldListView，因 AssistantPatch 落库校验需要移入 Core
+    public static let categories = ["地点", "势力", "规则", "物品", "其他"]
 
-    init(id: UUID = UUID(), category: String, name: String, content: String = "") {
+    public let id: UUID
+    @Published public var category: String                 // 地点 / 势力 / 规则 / 物品 / 其他
+    @Published public var name: String
+    @Published public var content: String
+    public weak var novel: Novel?
+
+    public init(id: UUID = UUID(), category: String, name: String, content: String = "") {
         self.id = id
         self.category = category
         self.name = name
         self.content = content
     }
 
-    enum CodingKeys: String, CodingKey { case id, category, name, content }
+    public enum CodingKeys: String, CodingKey { case id, category, name, content }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         category = try c.decode(String.self, forKey: .category)
@@ -86,7 +91,7 @@ final class WorldEntry: Identifiable, ObservableObject, Codable {
         content = try c.decode(String.self, forKey: .content)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(category, forKey: .category)

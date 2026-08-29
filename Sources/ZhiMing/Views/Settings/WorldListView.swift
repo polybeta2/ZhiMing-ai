@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 世界观条目列表：按 category 分 Section
 struct WorldListView: View {
@@ -8,7 +10,8 @@ struct WorldListView: View {
     @State private var showNew = false
     @State private var deleting: WorldEntry?
 
-    static let categories = ["地点", "势力", "规则", "物品", "其他"]
+    /// 分类全集移入 Core（WorldEntry.categories），此处保留原名转发避免改动引用方
+    static let categories = WorldEntry.categories
 
     private var grouped: [(category: String, entries: [WorldEntry])] {
         Self.categories.compactMap { category in
@@ -96,3 +99,4 @@ private struct WorldRow: View {
         .contentShape(Rectangle())
     }
 }
+#endif

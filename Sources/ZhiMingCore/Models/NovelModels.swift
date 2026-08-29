@@ -1,37 +1,39 @@
 import Foundation
+#if canImport(Combine)
 import Combine
+#endif
 
 // 说明：本工具链（Windows/WSL + xtool 交叉编译）无法使用 SwiftData 的闭源宏
 // （xtool-org/xtool#149 已确认）。持久层改为「ObservableObject 模型 + JSON 文档存储」，
 // 实体字段、关系与级联语义与实施计划第四节保持一致；删除作品即整体移除子树，天然级联。
 // iOS 15 兼容：Observation(@Observable) 为 iOS 17+，此处统一用 Combine 的 ObservableObject。
 
-final class Novel: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var title: String
-    @Published var synopsis: String                 // 一句话创意/梗概
-    @Published var genre: String?
-    @Published var perspective: String?             // 叙事视角（第一人称/第三人称…）
-    @Published var styleGuide: String?              // 风格约束（续写时必注入）
-    @Published var accentColorHex: String?
+public final class Novel: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var title: String
+    @Published public var synopsis: String                 // 一句话创意/梗概
+    @Published public var genre: String?
+    @Published public var perspective: String?             // 叙事视角（第一人称/第三人称…）
+    @Published public var styleGuide: String?              // 风格约束（续写时必注入）
+    @Published public var accentColorHex: String?
     /// 一句话立项时用户启用的示例标签 id（生成蓝图时按关键词命中注入预设内容）
-    @Published var enabledTagIDs: [String] = []
+    @Published public var enabledTagIDs: [String] = []
     /// R18 增强：开启后写作/立项请求自动注入虚构情色写作规范（按输入语言二选一）
-    @Published var r18Enabled: Bool = false
-    @Published var createdAt: Date
-    @Published var updatedAt: Date
+    @Published public var r18Enabled: Bool = false
+    @Published public var createdAt: Date
+    @Published public var updatedAt: Date
 
-    @Published var volumes: [Volume] = []
-    @Published var characters: [CharacterCard] = []
-    @Published var worldEntries: [WorldEntry] = []
-    @Published var chatThreads: [ChatThread] = []
-    @Published var foreshadowings: [Foreshadowing] = []
+    @Published public var volumes: [Volume] = []
+    @Published public var characters: [CharacterCard] = []
+    @Published public var worldEntries: [WorldEntry] = []
+    @Published public var chatThreads: [ChatThread] = []
+    @Published public var foreshadowings: [Foreshadowing] = []
     /// 统计基线：最近一次记录起点字数的日期（仅到天）
-    @Published var lastStatsDate: Date?
+    @Published public var lastStatsDate: Date?
     /// 统计基线：当天起点总字数（今日新增 = 当前总字数 - 该值）
-    @Published var lastTotalWordCount: Int = 0
+    @Published public var lastTotalWordCount: Int = 0
 
-    init(id: UUID = UUID(), title: String, synopsis: String = "") {
+    public init(id: UUID = UUID(), title: String, synopsis: String = "") {
         self.id = id
         self.title = title
         self.synopsis = synopsis
@@ -41,14 +43,14 @@ final class Novel: Identifiable, ObservableObject, Codable {
 
     // MARK: - Codable（反向引用不入档，解码后重建）
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id, title, synopsis, genre, perspective, styleGuide
         case accentColorHex, enabledTagIDs, r18Enabled, createdAt, updatedAt
         case volumes, characters, worldEntries, chatThreads
         case foreshadowings, lastStatsDate, lastTotalWordCount
     }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
@@ -81,7 +83,7 @@ final class Novel: Identifiable, ObservableObject, Codable {
         chatThreads.forEach { $0.novel = self }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(title, forKey: .title)
@@ -104,7 +106,7 @@ final class Novel: Identifiable, ObservableObject, Codable {
     }
 }
 
-extension Novel {
+public extension Novel {
     /// R18 作品的强制强调色（血红色），开启期间不可修改
     static let r18AccentHex = "#CC0000"
     /// R18 免责说明三段文案（内联确认卡共用）
@@ -115,18 +117,18 @@ extension Novel {
 // 方法论参考 awesome-novel-agent 的维度划分，结构为本项目自行设计。
 
 /// 场景卡：本章一个场景的三要素
-struct SceneCard: Codable, Equatable {
-    var goal: String        // 主角这场想达成什么
-    var obstacle: String    // 什么拦着
-    var hook: String        // 什么悬念勾读者往下看
+public struct SceneCard: Codable, Equatable {
+    public var goal: String        // 主角这场想达成什么
+    public var obstacle: String    // 什么拦着
+    public var hook: String        // 什么悬念勾读者往下看
 
-    init(goal: String = "", obstacle: String = "", hook: String = "") {
+    public init(goal: String = "", obstacle: String = "", hook: String = "") {
         self.goal = goal
         self.obstacle = obstacle
         self.hook = hook
     }
 
-    var isEmpty: Bool {
+    public var isEmpty: Bool {
         goal.trimmingCharacters(in: .whitespaces).isEmpty
             && obstacle.trimmingCharacters(in: .whitespaces).isEmpty
             && hook.trimmingCharacters(in: .whitespaces).isEmpty
@@ -134,12 +136,12 @@ struct SceneCard: Codable, Equatable {
 }
 
 /// 冲突阶梯的一级（核心冲突逐级升高）
-struct ConflictRung: Codable, Equatable {
-    var level: Int              // 层级序号（1 起）
-    var obstacle: String        // 这一级的阻力/对手
-    var turningPoint: String?   // 跨入该层的转折点
+public struct ConflictRung: Codable, Equatable {
+    public var level: Int              // 层级序号（1 起）
+    public var obstacle: String        // 这一级的阻力/对手
+    public var turningPoint: String?   // 跨入该层的转折点
 
-    init(level: Int, obstacle: String, turningPoint: String? = nil) {
+    public init(level: Int, obstacle: String, turningPoint: String? = nil) {
         self.level = level
         self.obstacle = obstacle
         self.turningPoint = turningPoint
@@ -147,16 +149,16 @@ struct ConflictRung: Codable, Equatable {
 }
 
 /// 信息差：本卷「谁知道什么」从起点到终点的变化
-struct InfoGap: Codable, Equatable {
-    var start: String           // 卷初读者/主角知道什么
-    var end: String             // 卷末将揭示或颠覆什么
+public struct InfoGap: Codable, Equatable {
+    public var start: String           // 卷初读者/主角知道什么
+    public var end: String             // 卷末将揭示或颠覆什么
 
-    var isEmpty: Bool {
+    public var isEmpty: Bool {
         start.trimmingCharacters(in: .whitespaces).isEmpty
             && end.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    init(start: String = "", end: String = "") {
+    public init(start: String = "", end: String = "") {
         self.start = start
         self.end = end
     }
@@ -165,25 +167,25 @@ struct InfoGap: Codable, Equatable {
 // MARK: - 伏笔台账（v1.9）
 // 跨章跨卷的悬念追踪：摘要建档时 AI 提取新伏笔静默入库，续写时注入临近回收提醒。
 
-enum ForeshadowStatus: String, Codable {
+public enum ForeshadowStatus: String, Codable {
     case open       // 未回收
     case resolved   // 已回收
     case dropped    // 废弃（作者主动放弃此线）
 }
 
-struct Foreshadowing: Identifiable, Codable, Equatable {
-    let id: UUID
-    var title: String
-    var detail: String?
-    var plantedVolumeIndex: Int?    // 埋设卷序（1-based）
-    var plantedChapterOrder: Int?   // 埋设章序（卷内，1-based）
-    var plannedResolve: String?     // 计划回收位置（自由文本）
-    var status: ForeshadowStatus
-    var note: String?
+public struct Foreshadowing: Identifiable, Codable, Equatable {
+    public let id: UUID
+    public var title: String
+    public var detail: String?
+    public var plantedVolumeIndex: Int?    // 埋设卷序（1-based）
+    public var plantedChapterOrder: Int?   // 埋设章序（卷内，1-based）
+    public var plannedResolve: String?     // 计划回收位置（自由文本）
+    public var status: ForeshadowStatus
+    public var note: String?
     /// 摘要提取时标记：LLM 认为本章已回收此条，待作者确认（不自动翻转 status）
-    var suggestedResolved: Bool = false
+    public var suggestedResolved: Bool = false
 
-    init(id: UUID = UUID(), title: String, detail: String? = nil,
+    public init(id: UUID = UUID(), title: String, detail: String? = nil,
          plantedVolumeIndex: Int? = nil, plantedChapterOrder: Int? = nil,
          plannedResolve: String? = nil, status: ForeshadowStatus = .open,
          note: String? = nil, suggestedResolved: Bool = false) {
@@ -199,34 +201,34 @@ struct Foreshadowing: Identifiable, Codable, Equatable {
     }
 }
 
-final class Volume: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var name: String
-    @Published var outline: String?                 // 卷纲
+public final class Volume: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var name: String
+    @Published public var outline: String?                 // 卷纲
     /// 四维：情绪走向（按节拍，如 压抑→提升→打脸）
-    @Published var emotionArc: [String]?
+    @Published public var emotionArc: [String]?
     /// 四维：冲突阶梯（核心冲突逐级升高）
-    @Published var conflictLadder: [ConflictRung]?
+    @Published public var conflictLadder: [ConflictRung]?
     /// 四维：信息差（卷初谁知道什么 → 卷末揭示什么）
-    @Published var infoGap: InfoGap?
-    @Published var sortOrder: Int
-    weak var novel: Novel?
+    @Published public var infoGap: InfoGap?
+    @Published public var sortOrder: Int
+    public weak var novel: Novel?
 
-    @Published var chapters: [Chapter] = []
+    @Published public var chapters: [Chapter] = []
 
-    init(id: UUID = UUID(), name: String, sortOrder: Int, outline: String? = nil) {
+    public init(id: UUID = UUID(), name: String, sortOrder: Int, outline: String? = nil) {
         self.id = id
         self.name = name
         self.sortOrder = sortOrder
         self.outline = outline
     }
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id, name, outline, emotionArc, conflictLadder, infoGap
         case sortOrder, chapters
     }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
@@ -238,7 +240,7 @@ final class Volume: Identifiable, ObservableObject, Codable {
         chapters = try c.decode([Chapter].self, forKey: .chapters)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
@@ -251,22 +253,22 @@ final class Volume: Identifiable, ObservableObject, Codable {
     }
 }
 
-final class Chapter: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var title: String
-    @Published var detailedOutline: String?         // 本章细纲
+public final class Chapter: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var title: String
+    @Published public var detailedOutline: String?         // 本章细纲
     /// 场景卡：本章 1-3 个场景的三要素（目标/阻力/钩子）
-    @Published var sceneCards: [SceneCard]?
-    @Published var content: String                  // 正文
-    @Published var sortOrder: Int
-    @Published var wordCount: Int
-    @Published var updatedAt: Date
-    weak var volume: Volume?
+    @Published public var sceneCards: [SceneCard]?
+    @Published public var content: String                  // 正文
+    @Published public var sortOrder: Int
+    @Published public var wordCount: Int
+    @Published public var updatedAt: Date
+    public weak var volume: Volume?
 
-    @Published var snapshots: [ChapterSnapshot] = []
-    @Published var summary: ChapterSummary?
+    @Published public var snapshots: [ChapterSnapshot] = []
+    @Published public var summary: ChapterSummary?
 
-    init(id: UUID = UUID(), title: String, sortOrder: Int) {
+    public init(id: UUID = UUID(), title: String, sortOrder: Int) {
         self.id = id
         self.title = title
         self.sortOrder = sortOrder
@@ -275,12 +277,12 @@ final class Chapter: Identifiable, ObservableObject, Codable {
         self.updatedAt = .now
     }
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id, title, detailedOutline, sceneCards, content, sortOrder, wordCount, updatedAt
         case snapshots, summary
     }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
@@ -294,7 +296,7 @@ final class Chapter: Identifiable, ObservableObject, Codable {
         summary = try c.decodeIfPresent(ChapterSummary.self, forKey: .summary)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(title, forKey: .title)
@@ -309,28 +311,28 @@ final class Chapter: Identifiable, ObservableObject, Codable {
     }
 }
 
-final class ChapterSummary: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var summaryText: String              // 本章摘要
-    @Published var keyFacts: [String]               // 关键事实（叙事账本简化版）
-    weak var chapter: Chapter?
+public final class ChapterSummary: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var summaryText: String              // 本章摘要
+    @Published public var keyFacts: [String]               // 关键事实（叙事账本简化版）
+    public weak var chapter: Chapter?
 
-    init(id: UUID = UUID(), summaryText: String, keyFacts: [String] = []) {
+    public init(id: UUID = UUID(), summaryText: String, keyFacts: [String] = []) {
         self.id = id
         self.summaryText = summaryText
         self.keyFacts = keyFacts
     }
 
-    enum CodingKeys: String, CodingKey { case id, summaryText, keyFacts }
+    public enum CodingKeys: String, CodingKey { case id, summaryText, keyFacts }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         summaryText = try c.decode(String.self, forKey: .summaryText)
         keyFacts = try c.decode([String].self, forKey: .keyFacts)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(summaryText, forKey: .summaryText)
@@ -338,15 +340,15 @@ final class ChapterSummary: Identifiable, ObservableObject, Codable {
     }
 }
 
-final class ChapterSnapshot: Identifiable, ObservableObject, Codable {
-    let id: UUID
-    @Published var versionNumber: Int
-    @Published var content: String
-    @Published var triggerType: String              // manual_save / ai_insert / restore
-    @Published var createdAt: Date
-    weak var chapter: Chapter?
+public final class ChapterSnapshot: Identifiable, ObservableObject, Codable {
+    public let id: UUID
+    @Published public var versionNumber: Int
+    @Published public var content: String
+    @Published public var triggerType: String              // manual_save / ai_insert / restore
+    @Published public var createdAt: Date
+    public weak var chapter: Chapter?
 
-    init(id: UUID = UUID(), versionNumber: Int, content: String, triggerType: String) {
+    public init(id: UUID = UUID(), versionNumber: Int, content: String, triggerType: String) {
         self.id = id
         self.versionNumber = versionNumber
         self.content = content
@@ -354,9 +356,9 @@ final class ChapterSnapshot: Identifiable, ObservableObject, Codable {
         self.createdAt = .now
     }
 
-    enum CodingKeys: String, CodingKey { case id, versionNumber, content, triggerType, createdAt }
+    public enum CodingKeys: String, CodingKey { case id, versionNumber, content, triggerType, createdAt }
 
-    required init(from decoder: Decoder) throws {
+    public required init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         versionNumber = try c.decode(Int.self, forKey: .versionNumber)
@@ -365,7 +367,7 @@ final class ChapterSnapshot: Identifiable, ObservableObject, Codable {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(versionNumber, forKey: .versionNumber)

@@ -1,9 +1,16 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 @main
 struct ZhiMingApp: App {
     // AppStore 承担原计划中 ModelContainer 的职责（JSON 文档持久化）
-    @StateObject private var store: AppStore = AppStore.load()
+    @StateObject private var store: AppStore = {
+        let store = AppStore.load()
+        // 注入 Keychain 清理钩子（Core 不依赖 Security 框架）
+        store.providerKeyDeleter = { _ = KeychainHelper.delete(account: $0) }
+        return store
+    }()
     @Environment(\.scenePhase) private var scenePhase
 
     // 外观设置全局注入（强调色经 .tint，深色模式经 .preferredColorScheme）
@@ -35,3 +42,4 @@ struct ZhiMingApp: App {
         }
     }
 }
+#endif

@@ -1,5 +1,7 @@
+#if os(iOS) || os(macOS)
 import Foundation
 import Combine
+import ZhiMingCore
 
 /// 大纲辅助（卷纲 / 章细纲）流式生成状态机。
 /// 产出为「草稿」：由界面点「采纳」后填入编辑框，再走既有保存链路落盘，
@@ -448,3 +450,4 @@ enum OutlineDraftParser {
         return dims
     }
 }
+#endif

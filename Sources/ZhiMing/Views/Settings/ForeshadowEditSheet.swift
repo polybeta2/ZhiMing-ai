@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 extension ForeshadowStatus {
     /// 状态显示名
@@ -140,3 +142,4 @@ struct ForeshadowEditSheet: View {
         dismiss()
     }
 }
+#endif

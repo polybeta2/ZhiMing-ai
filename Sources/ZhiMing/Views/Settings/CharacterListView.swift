@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 角色卡列表（含「当前状态列」，借鉴司命 characters 表）
 struct CharacterListView: View {
@@ -109,3 +111,4 @@ private struct CharacterRow: View {
         return parts.joined(separator: " · ")
     }
 }
+#endif

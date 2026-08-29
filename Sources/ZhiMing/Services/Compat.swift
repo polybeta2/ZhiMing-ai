@@ -1,3 +1,4 @@
+#if canImport(SwiftUI)
 import SwiftUI
 import UIKit
 
@@ -218,3 +219,4 @@ struct InlineConfirmCard: View {
         .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 }
+#endif

@@ -1,4 +1,6 @@
+#if canImport(SwiftUI)
 import SwiftUI
+import ZhiMingCore
 
 /// 卷→章两级列表；章级操作菜单（新增/重命名/删除/上移下移）
 /// 章行：标题 + 字数 + 摘要状态徽标（已建档/未建档）
@@ -193,3 +195,4 @@ private struct ChapterRow: View {
         }
     }
 }
+#endif
