@@ -10,6 +10,8 @@ struct ChapterListView: View {
 
     @State private var renaming: Chapter?
     @State private var renameText = ""
+    @State private var showAutoWrite = false
+    @State private var showAutoWriteGate = false
 
     var body: some View {
         List {
@@ -39,12 +41,34 @@ struct ChapterListView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    addVolume()
-                } label: {
-                    Image(systemName: "folder.badge.plus")
+                HStack(spacing: AppTheme.spacing[2]) {
+                    Button {
+                        if AutoWriteViewModel.allOutlinesReady(in: novel) {
+                            showAutoWrite = true
+                        } else {
+                            showAutoWriteGate = true
+                        }
+                    } label: {
+                        Image(systemName: "sparkles")
+                    }
+                    Button {
+                        addVolume()
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                    }
                 }
             }
+        }
+        .sheet(isPresented: $showAutoWrite) {
+            AutoWriteSheet(novel: novel)
+        }
+        .alert("细纲未就绪", isPresented: $showAutoWriteGate) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            let missing = novel.allChaptersInOrder.filter {
+                ($0.detailedOutline ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }.count
+            Text("自动撰写需要全书细纲已全部生成。还有 \(missing) 章未生成，请先到「设定 → 大纲」页补齐。")
         }
         .sheet(isPresented: Binding(
             get: { renaming != nil },

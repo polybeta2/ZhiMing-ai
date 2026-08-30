@@ -99,6 +99,8 @@ public enum PromptID {
     public static let writingAssistant = "prompt.assistant.system"
     public static let assistantReadWrite = "prompt.assistant.rw.protocol"
     public static let antiAIFlavor = "prompt.antiai.system"
+    /// 去AI味 · 写作时自动约束（撰写/续写时前置注入，与改写版 antiAIFlavor 场景不同）
+    public static let antiAIInline = "prompt.antiai.inline.system"
     public static let volumeOutline = "prompt.volume.outline.system"
     public static let chapterOutline = "prompt.chapter.outline.system"
     public static let chapterBatchOutline = "prompt.chapter.batch.outline.system"
@@ -499,6 +501,23 @@ public final class PromptLibrary: ObservableObject {
                 8. 幅度护栏：以词句为单位微调，不做整段重写；拿不准的地方保持原样；
                 9. 若给出【本地体检结果】，逐项优先处理其指出的问题；
                 10. 只输出修改后的正文，不要解释、对照表或总结。
+                """
+            ),
+            BuiltInPrompt(
+                id: PromptID.antiAIInline,
+                name: "去AI味 · 写作时自动约束",
+                category: "写作",
+                placeholders: [],
+                defaultText: """
+                【去AI味 · 写作时自动约束】
+                本章正文在写作时同步遵守以下反模板规则（与细纲/内容要求冲突时，以内容要求为准）：
+                1. 禁止解释性对举句式（「不是……而是……」式说明腔），改由动作与画面直接呈现；
+                2. 万能比喻（「仿佛/犹如/宛如/好似」）全章至多保留一处必要的；
+                3. 禁止「让/令/使 + 抽象感受」的强加因果，改为角色自身可观察的行为反应；
+                4. 少用「意识到/感到/明白/心中一凛」类认知直陈，情绪经身体细节与环境互动外化；
+                5. 禁用高频模板神态动作（瞳孔特写、倒吸凉气、勾唇、心中涌起一类），用贴合人物习惯的具体小动作替代；
+                6. 打破句长均一：长短句交替，连续等长的段落必须变奏；「了」字过密处改完成态或直接动词；
+                7. 不为规避上述规则而堆砌生僻表达，自然优先。
                 """
             ),
             BuiltInPrompt(

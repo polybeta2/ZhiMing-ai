@@ -17,6 +17,16 @@ final class StylePromptTests: XCTestCase {
         }
     }
 
+    func testAntiAIInlinePromptRegistered() {
+        let text = MainActor.assumeIsolated {
+            PromptLibrary.shared.resolvedText(for: PromptID.antiAIInline)
+        }
+        XCTAssertFalse(text.isEmpty, "去AI味·写作时自动约束出厂文本缺失")
+        XCTAssertTrue(text.contains("写作时同步遵守"), "必须是写作时约束（而非改写指令）")
+        XCTAssertTrue(text.contains("说明腔"), "必须覆盖解释性对举句式规则")
+        XCTAssertFalse(text.contains("只输出修改后的正文"), "不得混入改写场景专属指令")
+    }
+
     func testAnalyzePromptContainsGuardrails() {
         let text = MainActor.assumeIsolated {
             PromptLibrary.shared.resolvedText(for: PromptID.styleDistillAnalyze)

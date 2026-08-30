@@ -19,7 +19,7 @@ final class WritingSessionViewModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
 
     func start(mode: Mode, chapter: Chapter, novel: Novel, provider: ProviderConfig,
-               instruction: String?, styleCard: String? = nil) {
+               instruction: String?, styleCard: String? = nil, antiAIInline: Bool = false) {
         guard phase != .streaming else { return }
         draft = ""
         errorMessage = nil
@@ -46,21 +46,30 @@ final class WritingSessionViewModel: ObservableObject {
         // 文风档案注入卡由调用方解析（支持会话级临时切换），渲染器已按各 variant 预算裁剪；
         // 撰写/续写/改写/润色/扩写用 .writing，去AI味用 .antiAI
 
+        // 去AI味 · 写作时自动约束：撰写/续写开启时把反模板规则前置进系统提示词（预防优于事后改写）
+        let antiAIText: String?
+        switch mode {
+        case .writing, .continueWriting:
+            antiAIText = antiAIInline ? PromptLibrary.shared.resolvedText(for: PromptID.antiAIInline) : nil
+        case .rewrite:
+            antiAIText = nil   // 改写链路不消费（去AI味模式自带完整改写模板）
+        }
+
         let baseMessages: [LLMMessage]
         switch mode {
         case .writing(let wordTarget):
             // 从零撰写整章：content 为空时正文末尾段自然为空，上下文装配与续写共用
             let budget = PromptTemplates.adjustedInputBudget(
                 base: provider.contextBudgetChars,
-                injections: r18Text, styleCard, provider.systemPromptExtra)
+                injections: r18Text, styleCard, antiAIText, provider.systemPromptExtra)
             let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget, styleCard: styleCard)
             truncatedSections = context.truncatedSections
             baseMessages = PromptTemplates.writing(context: context, wordTarget: wordTarget, extra: instruction)
         case .continueWriting(let wordTarget):
-            // 动态注入（R18/文风档案/附加指令）先占用预算，剩余额度才装配上下文
+            // 动态注入（R18/文风档案/去AI味/附加指令）先占用预算，剩余额度才装配上下文
             let budget = PromptTemplates.adjustedInputBudget(
                 base: provider.contextBudgetChars,
-                injections: r18Text, styleCard, provider.systemPromptExtra)
+                injections: r18Text, styleCard, antiAIText, provider.systemPromptExtra)
             let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget, styleCard: styleCard)
             truncatedSections = context.truncatedSections
             baseMessages = PromptTemplates.continueWriting(context: context, wordTarget: wordTarget, extra: instruction)
@@ -72,6 +81,9 @@ final class WritingSessionViewModel: ObservableObject {
         var scoped = baseMessages
         if let r18 = r18Text {
             scoped = PromptTemplates.applying(providerExtra: r18, to: scoped)
+        }
+        if let antiAI = antiAIText {
+            scoped = PromptTemplates.applying(providerExtra: antiAI, to: scoped)
         }
         let messages = PromptTemplates.applying(providerExtra: provider.systemPromptExtra, to: scoped)
 

@@ -127,8 +127,8 @@ struct ChapterEditorView: View {
             saveNow()
         }
         .sheet(isPresented: $showContinueSheet) {
-            ContinueWritingSheet(isNewChapter: text.count == 0, hasOutline: chapter.detailedOutline?.isEmpty == false) { wordTarget, instruction in
-                startContinue(wordTarget: wordTarget, instruction: instruction)
+            ContinueWritingSheet(isNewChapter: text.count == 0, hasOutline: chapter.detailedOutline?.isEmpty == false) { wordTarget, instruction, antiAIInline in
+                startContinue(wordTarget: wordTarget, instruction: instruction, antiAIInline: antiAIInline)
             }
         }
         .sheet(isPresented: $showRewriteSheet) {
@@ -328,7 +328,7 @@ struct ChapterEditorView: View {
 
     // MARK: - 生成流程
 
-    private func startContinue(wordTarget: Int, instruction: String?) {
+    private func startContinue(wordTarget: Int, instruction: String?, antiAIInline: Bool = false) {
         guard let provider = activeProvider, let novel else { return }
         let isNewChapter = text.count == 0
         lastContinue = (isNewChapter, wordTarget, instruction)
@@ -339,7 +339,8 @@ struct ChapterEditorView: View {
             novel: novel,
             provider: provider,
             instruction: instruction,
-            styleCard: styleCard(variant: .writing)
+            styleCard: styleCard(variant: .writing),
+            antiAIInline: antiAIInline
         )
     }
 
@@ -517,9 +518,11 @@ private struct ContinueWritingSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var wordTarget: Int
     @State private var instruction = ""
+    /// 去AI味 · 写作时自动约束（持久化：开关偏好跨会话保留）
+    @AppStorage("writing.antiai.inline") private var antiAIInline = false
     let isNewChapter: Bool
     var hasOutline: Bool = true
-    let onStart: (Int, String?) -> Void
+    let onStart: (Int, String?, Bool) -> Void
 
     /// 撰写：1500~4500 步进 500；续写：快捷 800/1500/2500
     private let newChapterOptions = Array(stride(from: 1500, through: 4500, by: 500))
@@ -564,6 +567,16 @@ private struct ContinueWritingSheet: View {
                         ? "例如：开篇以对话切入，节奏快一些…"
                         : "例如：本段以对话推进，减少环境描写…", minHeight: 56)
                 }
+                Section {
+                    Toggle(isOn: $antiAIInline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("去AI味 · 自动")
+                            Text("撰写时同步注入反模板规则（说明腔/万能比喻/模板神态等），无需事后去AI味")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
             .navigationTitle(isNewChapter ? "AI 撰写" : "AI 续写")
             .navigationBarTitleDisplayMode(.inline)
@@ -574,7 +587,7 @@ private struct ContinueWritingSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("开始生成") {
                         let extra = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onStart(wordTarget, extra.isEmpty ? nil : extra)
+                        onStart(wordTarget, extra.isEmpty ? nil : extra, antiAIInline)
                         dismiss()
                     }
                 }
