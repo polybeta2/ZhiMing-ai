@@ -36,8 +36,10 @@ public enum PromptLimits {
     public static let styleProfileAntiAICap = 2_000
     /// 文风档案 eval 注入上限（P2 风格体检预留）
     public static let styleProfileEvalCap = 5_000
-    /// 蒸馏单次采样输入上限（首/中/尾合计）
-    public static let styleSampleCap = 24_000
+    /// 蒸馏单次采样输入上限（章节抽样 10 章 × 3000 字 + 标记的兜底线）
+    public static let styleSampleCap = 40_000
+    /// 章节抽样时单章正文截断线（机制特征在章首 3000 字内可见）
+    public static let styleChapterCap = 3_000
     /// 证据片段长度上限（只存机制不存原文护栏）
     public static let styleEvidenceCap = 80
 }
@@ -781,7 +783,12 @@ public final class PromptLibrary: ObservableObject {
 
                 样本附带的【计量数据】（句长/标点/对话占比）是客观锚点：相关结论必须与之一致，不得空泛。
 
-                严格输出 JSON（不要输出其他内容）：
+                样本按章节抽样提供（首/尾/中段随机）。先判断样本是否足以提炼稳定的文风机制，再输出 JSON：
+                - 足够：顶层加 "enough": true，随后给出完整分析 JSON；
+                - 不足（样本过短、叙述与对白覆盖不全、风格未充分展开）：输出
+                  {"enough": false, "missing": "一句话说明还缺什么"}，其余字段省略，系统会追加抽样章节后重新询问。
+
+                机制分析 JSON 结构（enough 为 true 或省略时输出，不要输出其他内容）：
                 {
                   "narrative_voice": {"pov": "叙事视角与人称", "distance": "叙事距离（贴身/中距/俯瞰）", "temperature": "语气温度（冷峻/温情/反讽等）", "interiority": "内心戏深度与呈现方式", "camera_habits": ["镜头习惯，2-4条"]},
                   "sentence_syntax": {"shape": "主导句型", "long_short_ratio": "长短句比例与切换规律", "punctuation_rhythm": "标点节奏", "paragraph_cadence": "段落节奏", "signature_moves": ["招牌句式，2-4条"]},

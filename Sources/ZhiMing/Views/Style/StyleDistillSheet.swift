@@ -157,7 +157,7 @@ struct StyleDistillSheet: View {
 
             switch kind {
             case .paste:
-                MultilineField(text: $pastedText, placeholder: "粘贴样章正文…（建议 3000-50000 字，越多越准）", minHeight: 140)
+                MultilineField(text: $pastedText, placeholder: "粘贴样章正文…（含「第X章」标记的长篇会自动按章节抽样：首尾与中段共 6-10 章）", minHeight: 140)
             case .file:
                 Button {
                     showImporter = true
@@ -187,7 +187,7 @@ struct StyleDistillSheet: View {
             }
 
             Section {
-                Label("请确保你拥有样本的使用与分析权利。蒸馏只提取抽象文风机制（句法/节奏/词汇/对白等），不会复制情节、人物或设定。", systemImage: "checkmark.shield")
+                Label("请确保你拥有样本的使用与分析权利。蒸馏只提取抽象文风机制（句法/节奏/词汇/对白等），不会复制情节、人物或设定；全本字数统计用于客观锚点，LLM 只阅读抽样章节。", systemImage: "checkmark.shield")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

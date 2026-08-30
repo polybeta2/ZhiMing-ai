@@ -32,6 +32,9 @@ public enum StyleDistillError: LocalizedError {
 // MARK: - LLM 宽松 DTO（snake_case 对应提示词字段；全部可缺失）
 
 struct StyleAnalysisDraft: Decodable {
+    /// 样本是否足以提炼稳定文风机制（章节自适应抽样判定；缺失按 true 处理）
+    var enough: Bool?
+    var missing: String?
     var narrative_voice: Voice?
     var sentence_syntax: Syntax?
     var diction: Diction?
@@ -139,15 +142,19 @@ struct StyleFixItem: Decodable {
 
 // MARK: - 蒸馏流水线
 
-/// S1 计量（本地）→ S2 机制分析（LLM）→ S3 风格卡（LLM）→ S4 查重（本地 + 可选修正请求）。
+/// S1 计量（本地）→ S2 机制分析（LLM，章节自适应抽样）→ S3 风格卡（LLM）→ S4 查重（本地 + 可选修正请求）。
 /// 纯逻辑无 UI 依赖：LLMClient 注入，Linux XCTest 全流程可测。
 public final class StyleDistillationService {
     private let client: LLMClient
     private let config: GenerationConfig
+    /// 抽样随机源（测试注入固定值以获得确定性选章）
+    private let random: (Range<Int>) -> Int
 
-    public init(client: LLMClient, config: GenerationConfig) {
+    public init(client: LLMClient, config: GenerationConfig,
+                random: @escaping (Range<Int>) -> Int = { Int.random(in: $0) }) {
         self.client = client
         self.config = config
+        self.random = random
     }
 
     public func events(sourceText: String, sourceNote: String,
@@ -157,11 +164,12 @@ public final class StyleDistillationService {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    // S1 本地计量 + 分段采样
+                    // S1 本地计量（全本统计，作为客观锚点）
                     continuation.yield(.phase(.measuring))
                     let metrics = StyleMetrics.compute(sourceText)
-                    let samples = StyleMetrics.sampleSegments(in: sourceText, maxChars: PromptLimits.styleSampleCap)
-                    guard !samples.isEmpty else { throw StyleDistillError.emptySource }
+                    guard !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        throw StyleDistillError.emptySource
+                    }
 
                     let fresh = StyleProfile(name: sourceNote.isEmpty ? "未命名文风" : String(sourceNote.prefix(20)),
                                              sourceNote: sourceNote,
@@ -174,11 +182,10 @@ public final class StyleDistillationService {
                         continuation.yield(.phase(.buildingCard))
                     } else {
                         continuation.yield(.phase(.analyzing))
-                        let analysisRaw = try await complete(messages(analyzeSystem, analysisUser(samples, metrics)))
-                        guard let analysis = LLMJSONParser.decode(StyleAnalysisDraft.self, fromJSONObjectIn: analysisRaw) else {
-                            throw StyleDistillError.parseFailed("机制分析")
-                        }
-                        analysis.apply(to: fresh)
+                        let analysisRaw = try await self.analyzeAdaptively(
+                            sourceText: sourceText, metrics: metrics,
+                            analyzeSystem: analyzeSystem, into: fresh,
+                            reportProgress: { continuation.yield(.stream($0)) })
                         continuation.yield(.analysisReady(analysisRaw))
                         continuation.yield(.phase(.buildingCard))
                     }
@@ -223,6 +230,61 @@ public final class StyleDistillationService {
 
     private func messages(_ system: String, _ user: String) -> [LLMMessage] {
         [.init(role: .system, content: system), .init(role: .user, content: user)]
+    }
+
+    /// S2 自适应抽样分析：
+    /// 1) 整本按章节标记划分；首轮抽 前2+后2+中段随机2 章（单章截 3000 字）；
+    /// 2) 模型在分析 JSON 顶层回答 enough——不足则每轮补随机 2 章，至多 10 章 / 3 轮；
+    /// 3) 无章节结构（短样本/无标记）回退首/中/尾三窗采样，单轮完成。
+    private func analyzeAdaptively(sourceText: String, metrics: StyleMetricsSnapshot,
+                                   analyzeSystem: String, into profile: StyleProfile,
+                                   reportProgress: @escaping (StreamEvent) -> Void) async throws -> String {
+        let chapters = StyleChapterSampler.split(sourceText)
+
+        func runRound(_ samples: [StyleMetrics.Sample]) async throws -> (raw: String, draft: StyleAnalysisDraft) {
+            var accumulated = ""
+            for try await event in client.streamChat(messages: messages(analyzeSystem, analysisUser(samples, metrics)),
+                                                     config: config) {
+                if case .content(let delta) = event {
+                    accumulated += delta
+                    reportProgress(.content(delta))
+                }
+            }
+            guard let draft = LLMJSONParser.decode(StyleAnalysisDraft.self, fromJSONObjectIn: accumulated) else {
+                throw StyleDistillError.parseFailed("机制分析")
+            }
+            return (accumulated, draft)
+        }
+
+        // 无章节结构：三窗采样单轮
+        guard chapters.count >= 4 else {
+            let legacy = StyleMetrics.sampleSegments(in: sourceText, maxChars: PromptLimits.styleSampleCap)
+            let (raw, draft) = try await runRound(legacy)
+            draft.apply(to: profile)
+            return raw
+        }
+
+        var picked = StyleChapterSampler.selectInitial(total: chapters.count, pickRandom: random)
+        var lastRaw = ""
+        for round in 0..<3 {
+            let samples = picked.map { index -> StyleMetrics.Sample in
+                let chapter = chapters[index]
+                let body = String(chapter.body.prefix(PromptLimits.styleChapterCap))
+                return StyleMetrics.Sample(text: chapter.marker + "\n" + body, label: chapter.marker)
+            }
+            let (raw, draft) = try await runRound(samples)
+            lastRaw = raw
+            let satisfied = draft.enough != false
+                || picked.count >= min(StyleChapterSampler.maxChapters, chapters.count)
+                || round == 2
+            if satisfied {
+                draft.apply(to: profile)
+                return raw
+            }
+            picked = StyleChapterSampler.expand(picked, total: chapters.count, pickRandom: random)
+        }
+        // 循环必在 satisfied 处返回；兜底防御
+        throw StyleDistillError.parseFailed("机制分析")
     }
 
     private func analysisUser(_ samples: [StyleMetrics.Sample], _ metrics: StyleMetricsSnapshot) -> String {

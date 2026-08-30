@@ -171,4 +171,56 @@ final class StyleDistillationServiceTests: XCTestCase {
             XCTFail("应当抛出解析错误")
         } catch { /* 预期路径 */ }
     }
+
+    // MARK: 章节自适应抽样（整本长篇）
+
+    /// 12 章合成样本（每章约 1000 字，确保触发章节抽样路径）
+    private lazy var chapterSource: String = {
+        (1...12).map { i in
+            "第\(i)章 测试\n" + String(repeating: "第\(i)章的正文，雨夜巷口，脚步声散进雨里。", count: 40)
+        }.joined(separator: "\n\n")
+    }()
+
+    private let notEnoughJSON = #"{"enough": false, "missing": "对白样本不足"}"#
+
+    private lazy var enoughJSON = """
+    ```json
+    {"enough": true,
+     "narrative_voice":{"temperature":"冷峻克制"},
+     "sentence_syntax":{"shape":"短句主导"},
+     "emotion":{"directness":"移置不直陈"},
+     "anti_ai":{"forbidden_patterns":["说明腔"]}}
+    ```
+    """
+
+    func testAdaptiveSamplingExpandsWhenNotEnough() async throws {
+        // 第一轮 6 章 → 模型判不足 → 补 2 章第二轮 → 判足够 → 风格卡，共 3 次调用
+        let client = MockLLMClient(responses: [notEnoughJSON, enoughJSON, cardJSON])
+        let service = StyleDistillationService(client: client, config: GenerationConfig(temperature: 0.3, maxTokens: 4096),
+                                               random: { $0.lowerBound })
+        var profile: StyleProfile?
+        for try await event in service.events(sourceText: chapterSource, sourceNote: "《大书》",
+                                              analyzeSystem: "分析", cardSystem: "汇总", fixSystem: "修正") {
+            if case .completed(let p) = event { profile = p }
+        }
+        let result = try XCTUnwrap(profile)
+        XCTAssertEqual(client.requestCount, 3)
+        XCTAssertEqual(result.narrativeVoice.temperature, "冷峻克制", "档案字段来自第二轮（enough）分析")
+        XCTAssertEqual(result.name, "冷雨短句")
+    }
+
+    func testAdaptiveSamplingCapsAtThreeRounds() async throws {
+        // 三轮都判不足 → 第 10 章封顶强制采纳 → 风格卡，共 4 次调用
+        let client = MockLLMClient(responses: [notEnoughJSON, notEnoughJSON, notEnoughJSON, cardJSON])
+        let service = StyleDistillationService(client: client, config: GenerationConfig(temperature: 0.3, maxTokens: 4096),
+                                               random: { $0.lowerBound })
+        var profile: StyleProfile?
+        for try await event in service.events(sourceText: chapterSource, sourceNote: "《大书》",
+                                              analyzeSystem: "分析", cardSystem: "汇总", fixSystem: "修正") {
+            if case .completed(let p) = event { profile = p }
+        }
+        let result = try XCTUnwrap(profile)
+        XCTAssertEqual(client.requestCount, 4)
+        XCTAssertNotNil(result.localMetrics)
+    }
 }
