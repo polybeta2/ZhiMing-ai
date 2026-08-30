@@ -472,11 +472,11 @@ private struct ChapterOutlineEditSheet: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    TextField("主角这场想达成什么", text: cardBinding(index, \.goal))
+                    MultilineField(text: cardBinding(index, \.goal), placeholder: "主角这场想达成什么", minHeight: 20, maxLines: 4, textStyle: .subheadline)
                         .font(.subheadline)
-                    TextField("什么拦着（阻力/对手）", text: cardBinding(index, \.obstacle))
+                    MultilineField(text: cardBinding(index, \.obstacle), placeholder: "什么拦着（阻力/对手）", minHeight: 20, maxLines: 4, textStyle: .subheadline)
                         .font(.subheadline)
-                    TextField("章末悬念钩子", text: cardBinding(index, \.hook))
+                    MultilineField(text: cardBinding(index, \.hook), placeholder: "章末悬念钩子", minHeight: 20, maxLines: 4, textStyle: .subheadline)
                         .font(.subheadline)
                 }
                 .padding(.vertical, 2)
@@ -685,7 +685,7 @@ private struct FourDimsEditor: View {
                         Text("L\(ladder[index].level)")
                             .font(.caption2.bold())
                             .frame(width: 30, alignment: .leading)
-                        TextField("该层阻力/对手", text: rungObstacleBinding(index))
+                        MultilineField(text: rungObstacleBinding(index), placeholder: "该层阻力/对手", minHeight: 20, maxLines: 3, textStyle: .subheadline)
                             .font(.subheadline)
                         Button(role: .destructive) {
                             removeRung(at: index)
@@ -695,7 +695,7 @@ private struct FourDimsEditor: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    TextField("跨入该层的转折点（可选）", text: rungTurningBinding(index))
+                    MultilineField(text: rungTurningBinding(index), placeholder: "跨入该层的转折点（可选）", minHeight: 18, maxLines: 3, textStyle: .footnote)
                         .font(.footnote)
                 }
             }
@@ -715,9 +715,9 @@ private struct FourDimsEditor: View {
 
     private var infoGapRows: some View {
         Group {
-            TextField("信息差 · 卷初谁知道什么", text: infoBinding(\.start))
+            MultilineField(text: infoBinding(\.start), placeholder: "信息差 · 卷初谁知道什么", minHeight: 20, maxLines: 3, textStyle: .subheadline)
                 .font(.subheadline)
-            TextField("信息差 · 卷末将揭示或颠覆什么", text: infoBinding(\.end))
+            MultilineField(text: infoBinding(\.end), placeholder: "信息差 · 卷末将揭示或颠覆什么", minHeight: 20, maxLines: 3, textStyle: .subheadline)
                 .font(.subheadline)
         }
     }
