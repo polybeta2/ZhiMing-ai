@@ -15,6 +15,8 @@ struct NovelCreateSheet: View {
 
     // 同人立项：档案选择
     @State private var showFanficPicker = false
+    /// 已选档案 → 弹文风选择（sheet item）
+    @State private var styleChoiceProfile: StyleChoiceJob?
 
     // 空白建书表单
     @State private var title = ""
@@ -111,6 +113,12 @@ struct NovelCreateSheet: View {
         }
         .padding(AppTheme.spacing[3])
         .sheet(isPresented: $showFanficPicker) { fanficProfilePicker }
+        .sheet(item: $styleChoiceProfile) { job in
+            FanficStyleChoiceSheet(profile: job.profile, store: store) { styleID in
+                styleChoiceProfile = nil
+                createFromSource(job.profile, styleProfileID: styleID)
+            }
+        }
     }
 
     private func entryCard(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
@@ -140,6 +148,12 @@ struct NovelCreateSheet: View {
 
     // MARK: - 同人立项
 
+    /// 已选档案 + 文风选择（sheet identity）
+    private struct StyleChoiceJob: Identifiable {
+        let id = UUID()
+        let profile: SourceNovelProfile
+    }
+
     /// 档案选择列表：未完成分析的档案置灰并引导完成扫描
     private var fanficProfilePicker: some View {
         CompatNavigationView {
@@ -152,7 +166,7 @@ struct NovelCreateSheet: View {
                     List {
                         ForEach(store.sourceProfiles) { profile in
                             Button {
-                                createFromSource(profile)
+                                styleChoiceProfile = StyleChoiceJob(profile: profile)
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
@@ -192,12 +206,12 @@ struct NovelCreateSheet: View {
         }
     }
 
-    /// 从原作档案建同人书：绑定 sourceProfileID，继承档案绑定的文风
-    private func createFromSource(_ profile: SourceNovelProfile) {
+    /// 从原作档案建同人书：绑定 sourceProfileID；文风按用户在建档时的选择设置
+    private func createFromSource(_ profile: SourceNovelProfile, styleProfileID: UUID?) {
         let novel = Novel(title: "《\(profile.title)》同人", synopsis: "")
         novel.sourceProfileID = profile.id
-        // 自动继承档案绑定的文风（书内可换绑）
-        novel.activeStyleProfileID = profile.styleProfileID
+        // 文风：继承档案绑定 / 不启用 / 其他档案，由用户在建档时选定
+        novel.activeStyleProfileID = styleProfileID
         novel.accentColorHex = AppTheme.accentPresets[0].hexString
 
         let volume = Volume(name: "第一卷", sortOrder: 1)
@@ -563,6 +577,93 @@ private struct TagPreviewSheet: View {
                 }
             }
         }
+    }
+}
+// MARK: - 同人文风选择（继承档案 / 不启用 / 其他文风档案）
+
+/// 同人建书时的文风选择项
+private enum FanficStyleChoice: Equatable {
+    case inherit          // 继承档案绑定的文风
+    case none             // 不启用任何文风
+    case custom(UUID)     // 指定其他小说的文风档案
+}
+
+/// 选择文风 sheet：默认跟随档案绑定（有绑定则预选），可改为不启用或选用其他文风档案
+private struct FanficStyleChoiceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let profile: SourceNovelProfile
+    let store: AppStore
+    var onConfirm: (UUID?) -> Void
+
+    @State private var choice: FanficStyleChoice
+
+    init(profile: SourceNovelProfile, store: AppStore, onConfirm: @escaping (UUID?) -> Void) {
+        self.profile = profile
+        self.store = store
+        self.onConfirm = onConfirm
+        _choice = State(initialValue: profile.styleProfileID != nil ? .inherit : .none)
+    }
+
+    private var boundName: String? {
+        profile.styleProfileID.flatMap { id in
+            store.styleProfiles.first { $0.id == id }?.name
+        }
+    }
+
+    var body: some View {
+        CompatNavigationView {
+            Form {
+                Section(footer: Text("选择用哪种文风来写这本同人；书创建后仍可在「设定 → 文风档案」中随时换绑。")) {
+                    if let name = boundName {
+                        row("继承原作文风（\(name)）", choice: .inherit)
+                    }
+                    row("不启用任何文风", choice: .none)
+                    if !store.styleProfiles.isEmpty {
+                        ForEach(store.styleProfiles) { style in
+                            row("文风：\(style.name)", choice: .custom(style.id))
+                        }
+                    }
+                }
+            }
+            .navigationTitle("选择文风")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("开始创作") { confirm() }
+                }
+            }
+        }
+    }
+
+    private func row(_ label: String, choice: FanficStyleChoice) -> some View {
+        Button {
+            self.choice = choice
+        } label: {
+            HStack {
+                Text(label)
+                Spacer()
+                if self.choice == choice {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func confirm() {
+        let styleID: UUID? = {
+            switch choice {
+            case .inherit: return profile.styleProfileID
+            case .none: return nil
+            case .custom(let id): return id
+            }
+        }()
+        onConfirm(styleID)
+        dismiss()
     }
 }
 #endif
