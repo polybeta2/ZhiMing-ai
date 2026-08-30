@@ -43,18 +43,22 @@ struct MultilineField: View {
     var fixedHeight: CGFloat? = nil
     /// 空态保底行数（如助手输入条空态 2 行），按实际字体行高换算
     var minLines: Int? = nil
+    /// 固定高度模式（按行）：如 fixedLines=2 表示固定 2 行高、内容超出内部滚动。
+    /// 对齐 fixedHeight，但随动态字体缩放；二者任一非空即进入固定高度模式
+    var fixedLines: Int? = nil
     var textStyle: UIFont.TextStyle = .body
 
     var body: some View {
         let uiFont = UIFont.preferredFont(forTextStyle: textStyle)
         let effectiveMin = minLines.map { max(minHeight, uiFont.lineHeight * CGFloat($0)) } ?? minHeight
+        let effectiveFixed = fixedLines.map { uiFont.lineHeight * CGFloat($0) } ?? fixedHeight
         return ZStack(alignment: .topLeading) {
             GrowingTextView(
                 text: $text,
                 textStyle: textStyle,
                 minHeight: effectiveMin,
                 maxLines: maxLines,
-                fixedHeight: fixedHeight
+                fixedHeight: effectiveFixed
             )
             if text.isEmpty {
                 Text(placeholder)
