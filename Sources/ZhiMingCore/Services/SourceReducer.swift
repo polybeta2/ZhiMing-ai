@@ -47,7 +47,9 @@ public enum SourceReducer {
         return [LLMMessage(role: .system, content: system), LLMMessage(role: .user, content: user)]
     }
 
-    /// 解析二段输出为档案；标题缺失用 fallbackTitle
+    // MARK: - 续写深度归并
+
+    /// 解析二段输出为档案；标题缺失用 fallbackTitle（普通档案：全书归并）
     public static func parseFinal(_ raw: String, fallbackTitle: String) throws -> SourceNovelProfile {
         guard let json = LLMJSONParser.extractJSONObject(from: raw),
               let data = json.data(using: .utf8) else { throw SourceScanError.parseFailed }
@@ -63,6 +65,65 @@ public enum SourceReducer {
         profile.characters = dto.characters ?? []
         profile.timeline = dto.timeline ?? []
         profile.worldbuilding = dto.worldbuilding ?? []
+        return profile
+    }
+
+    /// 续写深度归并：输入 1~X 章的阶段摘要（含「未回收伏笔」小节），
+    /// 输出续写档案——人物卡含「截至 X 章」现状快照、未回收伏笔清单、剧情弧与走向势能。
+    public static func continuationPrompt(stageSummaries: [String], upToChapter: Int) -> [LLMMessage] {
+        let user = """
+        【阶段摘要】（已分析至第 \(upToChapter) 章）
+        \(stageSummaries.joined(separator: "\n\n=== 阶段分隔 ===\n\n"))
+
+        请生成这本小说「截至第 \(upToChapter) 章」的续写档案，严格输出 JSON（不要输出其他内容）：
+        {"title_suggestion": "根据内容推断的书名（若明确则原文）",
+         "characters": [{"name": "", "aliases": [], "role": "主角/配角/反派…", "oneLine": "一句话定位", "appearance": "", "personality": "", "abilities": "", "current_state": "截至第\(upToChapter)章的现状（等级/能力/装备/心理/关系现状）", "relationships": [{"target": "角色名", "relation": "关系"}], "arc": [{"stage": "原作阶段", "change": "此阶段状态/性格变化"}]}],
+         "timeline": [{"phase": "原作阶段", "summary": "事件一句话", "participants": ["角色"], "importance": "major或minor", "consequence": "不可逆事实（无则省略）"}],
+         "worldbuilding": [{"category": "地点/势力/规则/物品/力量体系", "name": "", "content": ""}],
+         "open_threads": [{"title": "伏笔标题", "detail": "内容与线索（含埋设位置）", "planted_chapter": 埋设章号, "participants": ["角色"]}],
+         "plot_arc": "剧情弧与走向势能：主线冲突进展、当前所处阶段、下一阶段的走向势能（一段紧凑叙述）"}
+        规则：人物卡以「截至第 \(upToChapter) 章」的最新状态为准，current_state 必填（主要角色）；\
+        open_threads 只收录尚未回收的伏笔（以阶段摘要的「未回收伏笔」小节为准，已回收的不收）；不要虚构原文没有的事实。
+        """
+        let system = """
+        你是资深网文分析师，负责把小说前 \(upToChapter) 章的阶段摘要整理成「续写档案」：\
+        供后续 AI 从第 \(upToChapter + 1) 章无缝续写。人物现状快照、未回收伏笔、剧情走向势能是核心资产。
+        """
+        return [LLMMessage(role: .system, content: system), LLMMessage(role: .user, content: user)]
+    }
+
+    /// 解析深度归并产物为续写档案（title 缺失用 fallbackTitle）
+    public static func parseContinuation(_ raw: String, fallbackTitle: String, upToChapter: Int) throws -> SourceNovelProfile {
+        guard let json = LLMJSONParser.extractJSONObject(from: raw),
+              let data = json.data(using: .utf8) else { throw SourceScanError.parseFailed }
+        struct DTO: Codable {
+            var title_suggestion: String?
+            var characters: [CanonCharacter]?
+            var timeline: [CanonEvent]?
+            var worldbuilding: [CanonWorldEntry]?
+            var open_threads: [ThreadDTO]?
+            var plot_arc: String?
+            struct ThreadDTO: Codable {
+                var title: String?
+                var detail: String?
+                var planted_chapter: Int?
+                var participants: [String]?
+            }
+        }
+        let dto = try JSONDecoder().decode(DTO.self, from: data)
+        let profile = SourceNovelProfile(
+            title: dto.title_suggestion?.isEmpty == false ? dto.title_suggestion! : fallbackTitle)
+        profile.characters = dto.characters ?? []
+        profile.timeline = dto.timeline ?? []
+        profile.worldbuilding = dto.worldbuilding ?? []
+        profile.continuationFromChapter = upToChapter
+        profile.openThreads = (dto.open_threads ?? []).map {
+            CanonThread(title: $0.title?.isEmpty == false ? $0.title! : "未命名伏笔",
+                        detail: $0.detail ?? "",
+                        plantedChapter: $0.planted_chapter,
+                        participants: $0.participants ?? [])
+        }
+        profile.plotArc = dto.plot_arc
         return profile
     }
 }
