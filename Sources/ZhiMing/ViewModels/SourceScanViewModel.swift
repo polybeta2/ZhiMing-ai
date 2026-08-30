@@ -35,6 +35,12 @@ final class SourceScanViewModel: ObservableObject {
     private var sourceTitle = ""
     private var sourceChars = 0
     private var currentMode: ScanMode = .fast
+    /// 单次请求分析的章数（1 = 逐章，API 自动批量 >1）
+    private(set) var batchSize = 1
+    /// Map 计时（秒/章），用于剩余时间估算
+    private var mapTimes: [TimeInterval] = []
+    @Published private(set) var avgSecondsPerChunk: Double = 0
+    @Published private(set) var estimatedRemainingSeconds: Int = 0
 
     init(provider: ProviderConfig, store: AppStore) {
         self.provider = provider
@@ -68,13 +74,15 @@ final class SourceScanViewModel: ObservableObject {
         }
     }
 
-    /// 启动/恢复一次扫描：mode 决定档位；doneIndexes 从 SourceScanCache 恢复
-    func start(graphText: String, title: String, mode: ScanMode) {
+    /// 启动/恢复一次扫描：mode 决定档位；batchSize 决定单次请求分析的章数（1 = 逐章）。
+    /// doneIndexes 从 SourceScanCache 恢复
+    func start(graphText: String, title: String, mode: ScanMode, batchSize: Int = 1) {
         guard phase == .idle || phase == .paused || isFailed else { return }
         sourceText = graphText
         sourceTitle = title
         sourceChars = graphText.count
         currentMode = mode
+        self.batchSize = max(1, min(batchSize, 10))
 
         phase = .splitting
         let chunks = SourceScanChunker.chunks(from: graphText, mode: mode)
@@ -119,7 +127,7 @@ final class SourceScanViewModel: ObservableObject {
 
     func resume() {
         guard phase == .paused else { return }
-        start(graphText: sourceText, title: sourceTitle, mode: sourceMode)
+        start(graphText: sourceText, title: sourceTitle, mode: sourceMode, batchSize: batchSize)
     }
 
     func reset() {
@@ -184,6 +192,29 @@ final class SourceScanViewModel: ObservableObject {
         return ("", false)
     }
 
+    /// 批量解析（API 自动批量用）：网络/解析失败重试 3 次；
+    /// 返回 nil 表示全败（调用方暂停）。key = 0-based 全书章序
+    private func fetchBatchParsed(_ msgs: [LLMMessage], client: OpenAICompatibleClient,
+                                  config: GenerationConfig, attempts: Int = 3) async -> [Int: SourceMicroSummarizer.MicroSummary]? {
+        for _ in 0..<attempts {
+            if Task.isCancelled { return nil }
+            let (reply, drained) = await fetch(msgs, client: client, config: config)
+            guard drained else { continue }
+            if let parsed = try? SourceBatchHelper.parseBatchOutput(reply) {
+                return parsed
+            }
+        }
+        return nil
+    }
+
+    /// 剩余时间估算：平均秒/章 ×（总块 - 已完块）
+    private func updateEstimate() {
+        guard !mapTimes.isEmpty else { return }
+        avgSecondsPerChunk = mapTimes.reduce(0, +) / Double(mapTimes.count)
+        let remaining = max(0, totalChunks - doneChunks)
+        estimatedRemainingSeconds = Int(avgSecondsPerChunk * Double(remaining))
+    }
+
     /// 微摘要 token 近似（输出字符数 / 2）
     private func microChars(_ micro: SourceMicroSummarizer.MicroSummary) -> Int {
         ((try? String(data: JSONEncoder().encode(micro), encoding: .utf8))?.count ?? 0) / 2
@@ -197,31 +228,66 @@ final class SourceScanViewModel: ObservableObject {
         var inTotal = priorIn
         var outTotal = priorOut
 
-        // ---- Map：逐块（跳过 done），网络/解析失败各重试 3 次 ----
-        for (pos, chunk) in chunks.enumerated() where !done.contains(pos) {
+        // ---- Map：连续未完成块成组，一次请求分析 batchSize 章（跳过 done） ----
+        var pos = 0
+        while pos < chunks.count {
             if Task.isCancelled { break }
-            let msgs = SourceMicroSummarizer.messages(chunk: chunk.text, chapterMarker: nil)
-            let result = await fetchParsed(msgs, client: client, config: mapConfig)
-            if result == nil {
-                // 网络 3 次全败：当前块留在 pending，暂停供换服务商/续跑
-                await MainActor.run { [weak self] in self?.cancel() }
-                return
+            if done.contains(pos) { pos += 1; continue }
+            // 顺取本组：从 pos 起最多 batchSize 个未 done 块
+            var group: [(pos: Int, chapter: Int, text: String)] = []
+            var g = pos
+            while g < chunks.count && group.count < batchSize {
+                if done.contains(g) { break }
+                group.append((g, chunks[g].chapterIndex, chunks[g].text))
+                g += 1
             }
-            if Task.isCancelled { break }
-            inTotal += msgs.totalContentChars / 2
-            let micro = result ?? SourceMicroSummarizer.MicroSummary()   // 解析全败 → 降级空摘要
-            outTotal += microChars(micro)
-            SourceScanCache.mark(profile: pid, idx: pos, status: "done",
-                                 payload: microPayload(micro),
-                                 tokensIn: inTotal, tokensOut: outTotal)
-            if Task.isCancelled { break }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.doneChunks = min(self.doneChunks + 1, self.totalChunks)
-                self.tokensIn = inTotal
-                self.tokensOut = outTotal
+            guard !group.isEmpty else { pos += 1; continue }
+
+            let t0 = Date()
+            var groupSummary: [Int: SourceMicroSummarizer.MicroSummary] = [:]
+            if group.count == 1 {
+                // 逐章：沿用原协议（含角色系统提示）
+                let single = group[0]
+                let msgs = SourceMicroSummarizer.messages(chunk: single.text, chapterMarker: nil)
+                let result = await fetchParsed(msgs, client: client, config: mapConfig)
+                if result == nil {
+                    await MainActor.run { [weak self] in self?.cancel() }
+                    return
+                }
+                groupSummary[single.chapter] = result
+            } else {
+                // 批量：SourceBatchHelper 生成「指令 + N 章正文」，AI 逐章返回一行 JSON
+                let batch = group.map { (index: $0.chapter + 1, title: nil as String?, body: $0.text) }
+                let prompt = SourceBatchHelper.prompt(title: sourceTitle, chapters: batch)
+                let msgs = [LLMMessage(role: .user, content: prompt)]
+                guard let result = await fetchBatchParsed(msgs, client: client, config: mapConfig) else {
+                    await MainActor.run { [weak self] in self?.cancel() }
+                    return
+                }
+                groupSummary = result
             }
-            micros.append(micro)
+            let elapsed = Date().timeIntervalSince(t0)
+            mapTimes.append(elapsed / Double(group.count))     // 折算为秒/章
+
+            // 落库 & 进度（同章多块共用同一份摘要）
+            for item in group {
+                if Task.isCancelled { break }
+                inTotal += item.text.count / 2
+                let micro = groupSummary[item.chapter] ?? SourceMicroSummarizer.MicroSummary()
+                outTotal += microChars(micro)
+                SourceScanCache.mark(profile: pid, idx: item.pos, status: "done",
+                                     payload: microPayload(micro),
+                                     tokensIn: inTotal, tokensOut: outTotal)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.doneChunks = min(self.doneChunks + 1, self.totalChunks)
+                    self.tokensIn = inTotal
+                    self.tokensOut = outTotal
+                }
+                micros.append(micro)
+            }
+            updateEstimate()
+            pos = g
         }
         guard !Task.isCancelled else {
             progress.finish()

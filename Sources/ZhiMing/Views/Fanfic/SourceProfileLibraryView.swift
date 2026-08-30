@@ -10,6 +10,7 @@ private struct ScanJob: Identifiable {
     let text: String
     let title: String
     let mode: ScanMode
+    let batchSize: Int
     let provider: ProviderConfig
 }
 
@@ -39,7 +40,7 @@ private struct ScanProgressWrap: View {
             dismiss()
         }
         .onAppear {
-            vm.start(graphText: job.text, title: job.title, mode: job.mode)
+            vm.start(graphText: job.text, title: job.title, mode: job.mode, batchSize: job.batchSize)
         }
     }
 }
@@ -173,6 +174,8 @@ struct SourceProfileLibraryView: View {
     // MARK: 档位选择
 
     @State private var chosenMode: ScanMode = .fast
+    /// 自动批量：单次请求分析的章数（默认 3）
+    @State private var chosenBatchSize = 3
 
     /// 待分析文件（含切章统计）
     @State private var pendingScan: PendingFile?
@@ -186,6 +189,20 @@ struct SourceProfileLibraryView: View {
                         Text("精扫").tag(ScanMode.full)
                     }
                     .pickerStyle(.segmented)
+                }
+                Section {
+                    Picker("批量章数", selection: $chosenBatchSize) {
+                        ForEach(1...10, id: \.self) { n in
+                            Text(n == 1 ? "逐章（1）" : "\(n) 章").tag(n)
+                        }
+                    }
+                    Text("单次请求携带多章正文由 AI 逐章返回微摘要，请求数更少、总耗时更短。按模型上下文调整：Gemini 建议 5，DeepSeek Pro 约 20（这里按模型输入限额保守给 10 封顶），DeepSeek App Flash 30~50 可在外部分析使用。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("自动批量")
+                } footer: {
+                    Text("默认 3 章/请求，兼顾速度与上下文安全。")
                 }
                 if let pending = pendingScan {
                     Section("文件") {
@@ -215,7 +232,8 @@ struct SourceProfileLibraryView: View {
                         guard let provider = store.defaultProvider,
                               let pending = pendingScan else { return }
                         activeJob = ScanJob(text: pending.text, title: pending.title,
-                                            mode: chosenMode, provider: provider)
+                                            mode: chosenMode, batchSize: chosenBatchSize,
+                                            provider: provider)
                         showModePicker = false
                     }
                     .disabled(store.defaultProvider == nil)

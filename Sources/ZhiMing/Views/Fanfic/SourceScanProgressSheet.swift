@@ -31,6 +31,9 @@ struct SourceScanProgressSheet: View {
                 stageCapsules
                 StreamingStatusView(tracker: vm.progress)
                 blockProgress
+                if vm.phase == .mapping && vm.estimatedRemainingSeconds > 0 {
+                    remainingEstimate
+                }
                 tokenMeter
                 if vm.phase == .paused || vm.isFailed {
                     providerPicker
@@ -66,6 +69,26 @@ struct SourceScanProgressSheet: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, AppTheme.spacing[0])
+    }
+
+    /// 剩余时间估算：平均秒/章 × 剩余块数（随进度滚动）
+    private var remainingEstimate: some View {
+        let secs = vm.estimatedRemainingSeconds
+        let text: String
+        if secs >= 3600 {
+            text = String(format: "%d 小时 %02d 分", secs / 3600, (secs % 3600) / 60)
+        } else if secs >= 60 {
+            text = String(format: "%d 分 %02d 秒", secs / 60, secs % 60)
+        } else {
+            text = "\(secs) 秒"
+        }
+        return HStack(spacing: 6) {
+            Image(systemName: "clock")
+            Text("预计剩余 \(text)（平均 \(String(format: "%.1f", vm.avgSecondsPerChunk)) 秒/章）")
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
     }
 
     /// 服务商切换（暂停/失败后可换，已保存的服务商列表）
