@@ -77,6 +77,20 @@ final class StyleChapterSamplerTests: XCTestCase {
         XCTAssertEqual(chapters.count, 2)
     }
 
+    func testVolumeMarkersDoNotTriggerSpike() {
+        // 真实网文结构：连续章号中间混插「第N集」卷标记（斗罗大陆同款）。
+        // 卷标记不参与裁决——否则 33 之后所有章都会被误判为尖刺并回并。
+        var text = "第一集 斗罗世界\n"
+        for i in 1...32 { text += chapter("第\(i)章 章\(i)") }
+        text += "第二集 新篇\n"
+        for i in 33...64 { text += chapter("第\(i)章 章\(i)") }
+        text += "第三集 终章\n"
+        let chapters = StyleChapterSampler.split(text)
+        XCTAssertGreaterThanOrEqual(chapters.count, 64, "卷标记不参与裁决，后续章节不得被误删")
+        XCTAssertEqual(chapters.first(where: { $0.number == 33 })?.number, 33)
+        XCTAssertEqual(chapters.first(where: { $0.number == 64 })?.number, 64)
+    }
+
     // MARK: 抽样选择
 
     private let deterministic: (Range<Int>) -> Int = { $0.lowerBound }

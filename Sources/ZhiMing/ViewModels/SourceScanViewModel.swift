@@ -78,8 +78,7 @@ final class SourceScanViewModel: ObservableObject {
         }
         let client = OpenAICompatibleClient(baseUrl: baseUrl, apiKey: apiKey, model: provider.modelName)
         self.client = client
-        let config = GenerationConfig(temperature: 0.4, maxTokens: 3000)
-        self.config = config
+        self.config = GenerationConfig(temperature: 0.4, maxTokens: 3000)
 
         let done = SourceScanCache.doneIndexes(profile: pid)
         doneChunks = done.count
@@ -89,8 +88,11 @@ final class SourceScanViewModel: ObservableObject {
         phase = .mapping
         progress.begin()
         task = Task { [weak self] in
-            await self?.runLoop(chunks: chunks, client: client, config: config,
-                                done: done, pid: pid, priorIn: priorIn, priorOut: priorOut)
+            await self?.runLoop(chunks: chunks, client: client, done: done, pid: pid,
+                                priorIn: priorIn, priorOut: priorOut,
+                                mapConfig: self?.config ?? GenerationConfig(temperature: 0.4, maxTokens: 3000),
+                                reduceConfig: GenerationConfig(temperature: 0.4, maxTokens: 6000),
+                                finalConfig: GenerationConfig(temperature: 0.3, maxTokens: 8000))
         }
     }
 
@@ -124,9 +126,11 @@ final class SourceScanViewModel: ObservableObject {
 
     // MARK: - 主循环（Map → 一段归并 → 二段终归并）
 
+    /// Map 阶段：微摘要短小，3000 足够；一段归并放宽到 6000；终归并整本档案取 8000（冒烟实测 3000 会截断 JSON）
     private func runLoop(chunks: [SourceScanChunker.Chunk], client: OpenAICompatibleClient,
-                         config: GenerationConfig, done: Set<Int>, pid: UUID,
-                         priorIn: Int, priorOut: Int) async {
+                         done: Set<Int>, pid: UUID, priorIn: Int, priorOut: Int,
+                         mapConfig: GenerationConfig, reduceConfig: GenerationConfig,
+                         finalConfig: GenerationConfig) async {
         var micros: [SourceMicroSummarizer.MicroSummary] = []
         var inTotal = priorIn
         var outTotal = priorOut
@@ -137,7 +141,7 @@ final class SourceScanViewModel: ObservableObject {
             let msgs = SourceMicroSummarizer.messages(chunk: chunk.text, chapterMarker: nil)
             var reply = ""
             do {
-                for try await event in client.streamChat(messages: msgs, config: config) {
+                for try await event in client.streamChat(messages: msgs, config: mapConfig) {
                     progress.handle(event)
                     if case .content(let delta) = event { reply += delta }
                     if Task.isCancelled { break }
@@ -161,7 +165,7 @@ final class SourceScanViewModel: ObservableObject {
                 let retry = try? await withThrowingTaskGroup(of: String.self) { group in
                     group.addTask {
                         var r = ""
-                        for try await event in client.streamChat(messages: msgs, config: config) {
+                        for try await event in client.streamChat(messages: msgs, config: mapConfig) {
                             if case .content(let delta) = event { r += delta }
                         }
                         return r
@@ -204,7 +208,7 @@ final class SourceScanViewModel: ObservableObject {
             let msgs = [LLMMessage(role: .user, content: prompt)]
             var reply = ""
             do {
-                for try await event in client.streamChat(messages: msgs, config: config) {
+                for try await event in client.streamChat(messages: msgs, config: reduceConfig) {
                     progress.handle(event)
                     if case .content(let delta) = event { reply += delta }
                     if Task.isCancelled { break }
@@ -230,7 +234,7 @@ final class SourceScanViewModel: ObservableObject {
         let finalMSGS = SourceReducer.finalPrompt(stageSummaries: stageSummaries, characters: [])
         var finalRaw = ""
         do {
-            for try await event in client.streamChat(messages: finalMSGS, config: config) {
+            for try await event in client.streamChat(messages: finalMSGS, config: finalConfig) {
                 progress.handle(event)
                 if case .content(let delta) = event { finalRaw += delta }
                 if Task.isCancelled { break }

@@ -12,8 +12,12 @@ public enum StyleChapterSampler {
     public struct SampleChapter: Equatable {
         public let marker: String      // 章节标题行（原样，去首尾空白）
         public let number: Int?        // 解析出的章号（「序章」等无数字标题为 nil）
+        public let symbol: Character?  // 标记后缀类别：章/节/回/卷/集；纯数字行与 Chapter 12 为 nil
         public let body: String        // 标题行之后的正文
     }
+
+    /// 卷/集标记不参与尖刺裁决（真实网文常「第N集」混插连续章号，参与会误删后续全部章节）
+    private static let adjudicatableSymbols: Set<Character> = ["章", "节", "回"]
 
     /// 抽样规模：首轮 6 章，每轮补 2 章，至多 10 章
     public static let initialCount = 6
@@ -27,32 +31,33 @@ public enum StyleChapterSampler {
         let lines = text.components(separatedBy: .newlines)
 
         // 第一遍：按标记行切原始章
-        var raw: [(marker: String, number: Int?, body: String)] = []
+        var raw: [(marker: String, number: Int?, symbol: Character?, body: String)] = []
         var pending: [String] = []
         var preamble = ""
-        var lastMarker: (marker: String, number: Int?)?
+        var lastMarker: (marker: String, number: Int?, symbol: Character?)?
         for line in lines {
             if let number = markerNumber(in: line) {
+                let symbol = markerSymbol(in: line)
                 let body = pending.joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if let last = lastMarker {
-                    raw.append((last.marker, last.number, body))
+                    raw.append((last.marker, last.number, last.symbol, body))
                 } else if !body.isEmpty {
                     preamble = body   // 首个标记前通常是版权页/书名，不入样但保留给首章
                 }
                 pending = []
-                lastMarker = (line.trimmingCharacters(in: .whitespaces), number)
+                lastMarker = (line.trimmingCharacters(in: .whitespaces), number, symbol)
             } else {
                 pending.append(line)
             }
         }
         if let last = lastMarker {
-            raw.append((last.marker, last.number,
+            raw.append((last.marker, last.number, last.symbol,
                         pending.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)))
         }
         guard !raw.isEmpty else { return [] }
 
-        // 第二遍：序号裁决（回落型尖刺 = 假标记）
+        // 第二遍：序号裁决（回落型尖刺 = 假标记；卷/集标记不参与）
         let survivors = adjudicate(raw)
 
         // 第三遍：存活章组装；被裁标记（含其正文）按文档序并回上一个存活章
@@ -69,7 +74,8 @@ public enum StyleChapterSampler {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     pendingDrop = []
                 }
-                result.append(SampleChapter(marker: chapter.marker, number: chapter.number, body: body))
+                result.append(SampleChapter(marker: chapter.marker, number: chapter.number,
+                                            symbol: chapter.symbol, body: body))
             } else {
                 pendingDrop.append(chapter.marker + "\n" + chapter.body)
             }
@@ -77,7 +83,7 @@ public enum StyleChapterSampler {
         if !pendingDrop.isEmpty, !result.isEmpty {
             let last = result.removeLast()
             result.append(SampleChapter(
-                marker: last.marker, number: last.number,
+                marker: last.marker, number: last.number, symbol: last.symbol,
                 body: (last.body + "\n" + pendingDrop.joined(separator: "\n"))
                     .trimmingCharacters(in: .whitespacesAndNewlines)))
         }
@@ -87,9 +93,13 @@ public enum StyleChapterSampler {
     /// 序号裁决：返回存活的 raw 下标集合。
     /// 规则（按文档序）：连续重复章号舍弃后者；序号尖刺（> 前值 + 容差）且此后回落到
     /// 前值邻域 → 判为正文混入的数字（非章节）舍弃；单调跳号不回落则保留。
-    static func adjudicate(_ raw: [(marker: String, number: Int?, body: String)]) -> Set<Int> {
+    /// 参与裁决的只有「章/节/回」与纯数字/Chapter 标记；卷/集级标记永远保留。
+    static func adjudicate(_ raw: [(marker: String, number: Int?, symbol: Character?, body: String)]) -> Set<Int> {
         let numbered = raw.enumerated().compactMap { offset, chapter -> (offset: Int, number: Int)? in
             guard let number = chapter.number else { return nil }
+            if let symbol = chapter.symbol, !adjudicatableSymbols.contains(symbol) {
+                return nil   // 卷/集：保留但不参与裁决
+            }
             return (offset, number)
         }
         guard numbered.count >= 3 else { return Set(raw.indices) }   // 序号太少不做裁决
@@ -195,6 +205,25 @@ public enum StyleChapterSampler {
 
     private static func isNumeralChar(_ ch: Character) -> Bool {
         ch.isNumber || "零〇一二三四五六七八九十百千万两".contains(ch)
+    }
+
+    /// 判断一行是否章节标题并返回后缀类别（章/节/回/卷/集）；非「第X…」形式（纯数字行/Chapter 12）为 nil
+    static func markerSymbol(in line: String) -> Character? {
+        var trimmed = line.trimmingCharacters(in: .whitespaces)
+        if let halfwidth = trimmed.applyingTransform(.fullwidthToHalfwidth, reverse: false) {
+            trimmed = halfwidth.trimmingCharacters(in: .whitespaces)
+        }
+        guard trimmed.hasPrefix("第") else { return nil }
+        var idx = trimmed.index(after: trimmed.startIndex)
+        while idx < trimmed.endIndex, isNumeralChar(trimmed[idx]) {
+            idx = trimmed.index(after: idx)
+        }
+        guard idx < trimmed.endIndex else { return nil }
+        let rest = trimmed[idx...]
+        for symbol in ["章", "节", "回", "卷", "集"] where rest.hasPrefix(symbol) {
+            return Character(symbol)
+        }
+        return nil
     }
 
     /// 中文数字解析（一百二十三 → 123，一万三千 → 13000）；半角数字直接解析

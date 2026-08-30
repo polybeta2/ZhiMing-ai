@@ -41,7 +41,7 @@ public struct SourceScanEngine {
                         try Task.checkCancellation()
                         self.onChunkRequest(pos, self.chunks.count)
                         let msgs = SourceMicroSummarizer.messages(chunk: chunk.text, chapterMarker: nil)
-                        let (reply, drained) = await Self.request(client: self.client, messages: msgs)
+                        let (reply, drained) = await Self.request(client: self.client, messages: msgs, config: Self.config)
                         tokensIn += msgs.totalContentChars / 2
                         tokensOut += reply.count / 2
                         let micro: SourceMicroSummarizer.MicroSummary
@@ -49,7 +49,7 @@ public struct SourceScanEngine {
                             micro = parsed
                         } else if drained {
                             // 宽松重试一次 → 仍败降级空摘要（不阻塞）
-                            let retry = await Self.request(client: self.client, messages: msgs)
+                            let retry = await Self.request(client: self.client, messages: msgs, config: Self.config)
                             if let parsed = try? SourceMicroSummarizer.parse(retry.reply) {
                                 micro = parsed
                             } else {
@@ -74,14 +74,15 @@ public struct SourceScanEngine {
                         let slice = Array(micros[batchStart..<min(batchStart + batchSize, micros.count)])
                         let prompt = SourceReducer.batchPrompt(micros: slice, batchChars: 12000)
                         let msgs = [LLMMessage(role: .user, content: prompt)]
-                        let (reply, _) = await Self.request(client: self.client, messages: msgs)
+                        let (reply, _) = await Self.request(client: self.client, messages: msgs, config: Self.reduceConfig)
                         stageSummaries.append(reply)
                         continuation.yield(.reduceText(reply))
                     }
 
                     // ---- Reduce 二段：终归并为档案 ----
+                    // 冒烟教训：终归并输出可达 5000+ token，按 Map 的 3000 上限会截断 JSON 导致解析失败
                     let finalMSGS = SourceReducer.finalPrompt(stageSummaries: stageSummaries, characters: [])
-                    let (finalRaw, _) = await Self.request(client: self.client, messages: finalMSGS)
+                    let (finalRaw, _) = await Self.request(client: self.client, messages: finalMSGS, config: Self.finalConfig)
                     let profile = try SourceReducer.parseFinal(finalRaw, fallbackTitle: "同人原作")
                     continuation.yield(.phase(.done))
                     continuation.yield(.completed(profile))
@@ -94,7 +95,8 @@ public struct SourceScanEngine {
     }
 
     /// 单次流式请求：聚合 content 事件；返回 (正文拼接, 是否完整读完)
-    private static func request(client: LLMClient, messages: [LLMMessage]) async -> (reply: String, drained: Bool) {
+    private static func request(client: LLMClient, messages: [LLMMessage],
+                                config: GenerationConfig) async -> (reply: String, drained: Bool) {
         var reply = ""
         do {
             for try await ev in client.streamChat(messages: messages, config: config) {
@@ -106,5 +108,10 @@ public struct SourceScanEngine {
         }
     }
 
+    /// Map 阶段：微摘要短小，3000 足够
     private static var config: GenerationConfig { GenerationConfig(temperature: 0.4, maxTokens: 3000) }
+    /// 一段归并：阶段摘要可达数千字，放宽到 6000
+    private static var reduceConfig: GenerationConfig { GenerationConfig(temperature: 0.4, maxTokens: 6000) }
+    /// 终归并：整本档案 JSON 可达 5000+ token，放宽到 8000（冒烟实测 3000 会截断）
+    private static var finalConfig: GenerationConfig { GenerationConfig(temperature: 0.3, maxTokens: 8000) }
 }

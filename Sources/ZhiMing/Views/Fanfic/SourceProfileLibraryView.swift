@@ -1,6 +1,7 @@
 #if os(iOS) || os(macOS)
 import SwiftUI
 import UniformTypeIdentifiers
+import CoreFoundation
 import ZhiMingCore
 
 /// 一次扫描任务（sheet identity：进入即建 VM 并启动扫描）
@@ -45,6 +46,7 @@ struct SourceProfileLibraryView: View {
     /// 确认档位后 → 启动扫描 sheet
     @State private var activeJob: ScanJob?
     @State private var deletingProfile: SourceNovelProfile?
+    @State private var importError: String?
 
     private var sortedProfiles: [SourceNovelProfile] {
         store.sourceProfiles.sorted { $0.createdAt > $1.createdAt }
@@ -86,6 +88,14 @@ struct SourceProfileLibraryView: View {
                 store.deleteSourceProfile(profile)
                 SourceScanCache.clear(profile: profile.id)
             }
+        }
+        .alert("导入失败", isPresented: Binding(
+            get: { importError != nil },
+            set: { if !$0 { importError = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(importError ?? "")
         }
     }
 
@@ -166,18 +176,35 @@ struct SourceProfileLibraryView: View {
         }
     }
 
-    // MARK: 文件导入
+    // MARK: 文件导入（iOS 15：fileImporter + 安全作用域读取；常见站点 txt 多为 GBK 编码）
 
     private func loadFile(_ url: URL) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+        guard let data = try? Data(contentsOf: url) else {
+            importError = "无法读取文件（读入失败），请确认文件可访问后重试"
+            return
+        }
+        guard let text = decodeText(data) else {
+            importError = "无法识别文件编码（已尝试 UTF-8 与 GB18030）。请将文件另存为 UTF-8 编码后重试"
+            return
+        }
         // 去除头部 BOM（常见于 Windows 导出的 txt）
         let body = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
         let title = url.deletingPathExtension().lastPathComponent
         pendingScan = (body, title)
         chosenMode = .fast
         showModePicker = true
+    }
+
+    /// 编码探测：UTF-8 优先（含 BOM/容错），失败回退 GB18030（覆盖 GBK 全字符集）
+    private func decodeText(_ data: Data) -> String? {
+        if let text = String(data: data, encoding: .utf8) { return text }
+        if let text = String(data: data, encoding: .utf16) { return text }
+        let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+            CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+        if let text = String(data: data, encoding: gb18030) { return text }
+        return nil
     }
 }
 
