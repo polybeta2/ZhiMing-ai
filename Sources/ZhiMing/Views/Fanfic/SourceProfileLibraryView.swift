@@ -13,8 +13,9 @@ private struct ScanJob: Identifiable {
     let provider: ProviderConfig
 }
 
-/// 待分析文件信息（档位选择页展示章数/字数用）
-private struct PendingFile {
+/// 待分析文件信息（档位选择页展示章数/字数用；批量模式复用）
+private struct PendingFile: Identifiable {
+    let id = UUID()
     let text: String
     let title: String
     let chapterCount: Int
@@ -54,6 +55,9 @@ struct SourceProfileLibraryView: View {
     @State private var activeJob: ScanJob?
     @State private var deletingProfile: SourceNovelProfile?
     @State private var importError: String?
+    /// 批量复制分析：先选文件（fileImporter），成功后进 BatchCopySheet
+    @State private var batchMode = false
+    @State private var batchSource: PendingFile?
 
     private var sortedProfiles: [SourceNovelProfile] {
         store.sourceProfiles.sorted { $0.createdAt > $1.createdAt }
@@ -82,6 +86,12 @@ struct SourceProfileLibraryView: View {
                     } label: {
                         Label("从 origins 文件夹导入", systemImage: "folder.fill.badge.plus")
                     }
+                    Button {
+                        batchMode = true
+                        showImporter = true
+                    } label: {
+                        Label("批量复制分析（免费外部 AI）", systemImage: "arrow.triangle.2.circlepath")
+                    }
                 } label: {
                     Label("导入分析", systemImage: "doc.badge.plus")
                 }
@@ -92,6 +102,9 @@ struct SourceProfileLibraryView: View {
         }
         .sheet(isPresented: $showOriginPicker) {
             originFolderSheet
+        }
+        .sheet(item: $batchSource) { pending in
+            BatchCopySheet(text: pending.text, bookTitle: pending.title, store: store)
         }
         .sheet(isPresented: $showModePicker) {
             modePickerSheet
@@ -284,7 +297,35 @@ struct SourceProfileLibraryView: View {
     private func loadFile(_ url: URL) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-        presentScan(url: url)
+        guard let data = try? Data(contentsOf: url) else {
+            importError = "无法读取文件（读入失败），请确认文件可访问后重试"
+            return
+        }
+        guard let text = decodeText(data) else {
+            importError = "无法识别文件编码（已尝试 UTF-8 与 GB18030）。请将文件另存为 UTF-8 编码后重试"
+            return
+        }
+        // 去除头部 BOM（常见于 Windows 导出的 txt）
+        let body = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
+        let title = url.deletingPathExtension().lastPathComponent
+        if batchMode {
+            // 批量复制分析：直接进 BatchCopySheet（批内自行切章）
+            batchMode = false
+            batchSource = PendingFile(text: body, title: title, chapterCount: 0)
+            return
+        }
+        // 普通导入：切章统计 → 档位选择
+        // 导入即切章：让用户在档位选择页看到这本小说识别出多少章（切章是 CPU 密集操作，放后台）
+        Task {
+            let chapterCount = await Task.detached(priority: .userInitiated) {
+                StyleChapterSampler.split(body).count
+            }.value
+            await MainActor.run {
+                pendingScan = PendingFile(text: body, title: title, chapterCount: chapterCount)
+                chosenMode = .fast
+                showModePicker = true
+            }
+        }
     }
 
     /// 读文件 → 编码识别 → 切章统计 → 弹档位选择（fileImporter 与 origins 共用）

@@ -50,6 +50,10 @@ final class SourceScanViewModel: ObservableObject {
         provider = newProvider
     }
 
+    /// 批量复制模式：外部 AI 已把 Map 结果落库到 presetProfileID（chunk 断点键），
+    /// start 时沿用该键并跳过所有 done 块，直接走归并。
+    var presetProfileID: UUID?
+
     var isFailed: Bool { if case .failed = phase { return true }; return false }
 
     var phaseLabel: String {
@@ -77,8 +81,8 @@ final class SourceScanViewModel: ObservableObject {
         totalChunks = chunks.count
         guard !chunks.isEmpty else { phase = .failed("未能从文本中切出章节，请检查文件内容"); return }
 
-        // 断点键：旧档案沿用（暂停恢复），无则新建
-        let pid = profileID ?? UUID()
+        // 断点键：批量复制沿用 preset 键（跳过已 done 直接归并）；普通扫描沿用暂停恢复；否则新建
+        let pid = profileID ?? presetProfileID ?? UUID()
         profileID = pid
 
         guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
