@@ -53,12 +53,18 @@ struct MultilineField: View {
     @available(iOS 16.0, *)
     @ViewBuilder
     private var ios16Field: some View {
-        if let maxLines {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .lineLimit(1...maxLines)
-        } else {
-            TextField(placeholder, text: $text, axis: .vertical)
+        Group {
+            if let maxLines {
+                TextField(placeholder, text: $text, axis: .vertical)
+                    .lineLimit(1...maxLines)
+            } else {
+                TextField(placeholder, text: $text, axis: .vertical)
+            }
         }
+        // iOS 26+ 上 axis:.vertical 处于灵活高度容器（聊天输入条/表单/卡片）时，空态会把高度
+        // 拉伸到父容器整个可用区域导致占满整屏；fixedSize(vertical) 强制高度由文本行数决定
+        // （空态 = 1 行，随输入增高，封顶后内部滚动），杜绝该问题。
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var ios15Field: some View {
