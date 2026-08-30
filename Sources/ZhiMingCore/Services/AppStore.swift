@@ -189,6 +189,7 @@ public final class AppStore: ObservableObject {
 
     public func deleteSourceProfile(_ profile: SourceNovelProfile) {
         sourceProfiles.removeAll { $0.id == profile.id }
+        ContinuationStore.delete(profileID: profile.id)   // 续写原文边车同步清理
         // 解绑所有引用该档案的同人书，避免悬挂 UUID
         for novel in novels where novel.sourceProfileID == profile.id {
             novel.sourceProfileID = nil

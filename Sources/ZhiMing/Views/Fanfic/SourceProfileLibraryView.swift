@@ -379,6 +379,14 @@ private struct SourceProfileRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(statusLabel.1.opacity(0.12), in: Capsule())
+                if let upTo = profile.continuationFromChapter {
+                    Text("续写 · 截至第 \(upTo) 章")
+                        .font(.caption2.bold())
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.12), in: Capsule())
+                }
             }
             if let author = profile.author, !author.isEmpty {
                 Text(author).font(.caption).foregroundStyle(.secondary)

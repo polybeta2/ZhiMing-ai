@@ -9,6 +9,14 @@ enum SourceScanInjection {
     /// 给出档案，渲染全文梗概（澄清 4000 / 结构蓝图 8000 由调用方传 maxChars）
     static func sourceContext(profile: SourceNovelProfile, maxChars: Int) -> String? {
         guard profile.scanState.isComplete else { return nil }
+        if profile.continuationFromChapter != nil {
+            // 续写档案：人物快照/伏笔/剧情弧 + 近期原文滚动注入（蓝图/细纲/写作共用此路径）
+            let recent = ContinuationStore.loadTail(profileID: profile.id, maxChars: 1200)
+            let body = ContinuationContext.rendered(profile: profile, recentText: recent, maxChars: maxChars)
+            let title = profile.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let header = title.isEmpty ? "" : "原作：《\(title)》"
+            return [header, body].filter { !$0.isEmpty }.joined(separator: "\n")
+        }
         let window = SourceTimeWindow.window(phase: nil, profile: profile)
         let title = profile.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let header = title.isEmpty ? "" : "原作：《\(title)》"
@@ -19,6 +27,10 @@ enum SourceScanInjection {
     /// 按目标串（卷名/章标题）定位最近的原作阶段，返回该时间窗文本（未完成分析返回 nil）
     static func sourceWindow(profile: SourceNovelProfile, target: String?, maxChars: Int) -> String? {
         guard profile.scanState.isComplete else { return nil }
+        if profile.continuationFromChapter != nil {
+            // 续写档案不走阶段开窗：档案本身即「截至 X 章」的时间窗
+            return sourceContext(profile: profile, maxChars: maxChars)
+        }
         let phase = target.flatMap { nearestPhase(for: $0, in: profile) }
         let window = SourceTimeWindow.window(phase: phase, profile: profile)
         let body = window.rendered(maxChars: maxChars)

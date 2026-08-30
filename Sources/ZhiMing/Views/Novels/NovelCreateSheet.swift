@@ -15,6 +15,7 @@ struct NovelCreateSheet: View {
 
     // 同人立项：档案选择
     @State private var showFanficPicker = false
+    @State private var showContinuation = false
     /// 已选档案 → 弹文风选择（sheet item）
     @State private var styleChoiceProfile: StyleChoiceJob?
 
@@ -104,6 +105,13 @@ struct NovelCreateSheet: View {
             ) {
                 showFanficPicker = true
             }
+            entryCard(
+                icon: "square.and.pencil",
+                title: "续写小说",
+                subtitle: "导入断更/未写完的小说，选一章开始，AI 无缝续写"
+            ) {
+                showContinuation = true
+            }
             if store.sourceProfiles.isEmpty {
                 Text("还没有原作档案：先到书库页「原作档案库」导入 txt 分析。")
                     .font(.caption)
@@ -117,6 +125,11 @@ struct NovelCreateSheet: View {
             FanficStyleChoiceSheet(profile: job.profile, store: store) { styleID in
                 styleChoiceProfile = nil
                 createFromSource(job.profile, styleProfileID: styleID)
+            }
+        }
+        .sheet(isPresented: $showContinuation) {
+            ContinuationImportSheet { profile in
+                createContinuationFromSource(profile)
             }
         }
     }
@@ -226,6 +239,38 @@ struct NovelCreateSheet: View {
         store.novels.append(novel)
         store.save()
         showFanficPicker = false
+        dismiss()
+        onCreated(novel.id)
+    }
+
+    // MARK: - 续写建书
+
+    /// 从续写档案建书：绑定档案 + skipsClarification 直达结构规划（复用完整思路立项机制）
+    private func createContinuationFromSource(_ profile: SourceNovelProfile) {
+        let upTo = profile.continuationFromChapter ?? 0
+        let novel = Novel(title: "《\(profile.title)》续写", synopsis: "")
+        novel.sourceProfileID = profile.id
+        // 续写默认继承原作文风档案（若已绑定）
+        novel.activeStyleProfileID = profile.styleProfileID
+        novel.accentColorHex = AppTheme.accentPresets[0].hexString
+
+        let volume = Volume(name: "第一卷", sortOrder: 1)
+        volume.novel = novel
+        novel.volumes.append(volume)
+
+        let thread = ChatThread(purpose: "creation")
+        thread.novel = novel
+        novel.chatThreads.append(thread)
+        // 进入对话即自动规划续写蓝图（ChatView 的 skipsClarification 路径）
+        thread.skipsClarification = true
+        novel.synopsis = """
+        续写《\(profile.title)》：已分析原作前 \(upTo) 章。请基于注入的原作上下文（人物现状、未回收伏笔、剧情弧、世界设定、近期原文）规划续写蓝图：\
+        1) 续写方向与分卷结构；2) 未回收伏笔的回收计划（各伏笔回收的大致位置）；\
+        3) 基调与文风衔接（延续近期原文笔感）；4) 从第 \(upTo + 1) 章开始续写。
+        """
+
+        store.novels.append(novel)
+        store.save()
         dismiss()
         onCreated(novel.id)
     }
