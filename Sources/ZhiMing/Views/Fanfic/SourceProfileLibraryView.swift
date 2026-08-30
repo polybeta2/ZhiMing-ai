@@ -310,76 +310,35 @@ struct SourceProfileLibraryView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: 文件导入（iOS 15：fileImporter + 安全作用域读取；常见站点 txt 多为 GBK 编码）
+    // MARK: 文件导入（fileImporter 与 origins 双通道共用 presentScan）
 
     private func loadFile(_ url: URL) {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else {
-            importError = "无法读取文件（读入失败），请确认文件可访问后重试"
-            return
-        }
-        guard let text = decodeText(data) else {
-            importError = "无法识别文件编码（已尝试 UTF-8 与 GB18030）。请将文件另存为 UTF-8 编码后重试"
-            return
-        }
-        // 去除头部 BOM（常见于 Windows 导出的 txt）
-        let body = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
-        let title = url.deletingPathExtension().lastPathComponent
-        if batchMode {
-            // 批量复制分析：直接进 BatchCopySheet（批内自行切章）
-            batchMode = false
-            batchSource = PendingFile(text: body, title: title, chapterCount: 0)
-            return
-        }
-        // 普通导入：切章统计 → 档位选择
-        // 导入即切章：让用户在档位选择页看到这本小说识别出多少章（切章是 CPU 密集操作，放后台）
-        Task {
-            let chapterCount = await Task.detached(priority: .userInitiated) {
-                StyleChapterSampler.split(body).count
-            }.value
-            await MainActor.run {
-                pendingScan = PendingFile(text: body, title: title, chapterCount: chapterCount)
-                chosenMode = .fast
-                showModePicker = true
-            }
-        }
+        presentScan(url: url)
     }
 
     /// 读文件 → 编码识别 → 切章统计 → 弹档位选择（fileImporter 与 origins 共用）
     private func presentScan(url: URL) {
-        guard let data = try? Data(contentsOf: url) else {
-            importError = "无法读取文件（读入失败），请确认文件可访问后重试"
-            return
-        }
-        guard let text = decodeText(data) else {
-            importError = "无法识别文件编码（已尝试 UTF-8 与 GB18030）。请将文件另存为 UTF-8 编码后重试"
-            return
-        }
-        // 去除头部 BOM（常见于 Windows 导出的 txt）
-        let body = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
-        let title = url.deletingPathExtension().lastPathComponent
-        // 导入即切章：让用户在档位选择页看到这本小说识别出多少章（切章是 CPU 密集操作，放后台）
-        Task {
-            let chapterCount = await Task.detached(priority: .userInitiated) {
-                StyleChapterSampler.split(body).count
-            }.value
-            await MainActor.run {
-                pendingScan = PendingFile(text: body, title: title, chapterCount: chapterCount)
-                chosenMode = .fast
-                showModePicker = true
+        switch SourceTextFileLoader.loadText(from: url) {
+        case .failure(let message):
+            importError = message
+        case .success(let body):
+            let title = url.deletingPathExtension().lastPathComponent
+            if batchMode {
+                batchMode = false
+                batchSource = PendingFile(text: body, title: title, chapterCount: 0)
+                return
+            }
+            Task {
+                let chapterCount = await Task.detached(priority: .userInitiated) {
+                    StyleChapterSampler.split(body).count
+                }.value
+                await MainActor.run {
+                    pendingScan = PendingFile(text: body, title: title, chapterCount: chapterCount)
+                    chosenMode = .fast
+                    showModePicker = true
+                }
             }
         }
-    }
-
-    /// 编码探测：UTF-8 优先（含 BOM/容错），失败回退 GB18030（覆盖 GBK 全字符集）
-    private func decodeText(_ data: Data) -> String? {
-        if let text = String(data: data, encoding: .utf8) { return text }
-        if let text = String(data: data, encoding: .utf16) { return text }
-        let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
-            CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
-        if let text = String(data: data, encoding: gb18030) { return text }
-        return nil
     }
 }
 
