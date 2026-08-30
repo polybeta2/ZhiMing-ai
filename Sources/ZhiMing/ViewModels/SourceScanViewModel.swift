@@ -35,6 +35,8 @@ final class SourceScanViewModel: ObservableObject {
     private var sourceTitle = ""
     private var sourceChars = 0
     private var currentMode: ScanMode = .fast
+    /// 续写模式：终归并改走深度归并（continuationPrompt），产物带伏笔/剧情弧/现状，并写原文边车
+    private(set) var isContinuation = false
     /// 单次请求分析的章数（1 = 逐章，API 自动批量 >1）
     private(set) var batchSize = 1
     /// Map 计时（秒/章），用于剩余时间估算
@@ -67,7 +69,7 @@ final class SourceScanViewModel: ObservableObject {
         case .idle: return "准备中"
         case .splitting: return "切章分块中…"
         case .mapping: return "逐块提取中（Map）…"
-        case .reducing: return "归并档案中（Reduce）…"
+        case .reducing: return isContinuation ? "深度归并档案中（人物快照/伏笔/剧情弧）…" : "归并档案中（Reduce）…"
         case .done: return "分析完成"
         case .paused: return "已暂停"
         case .failed(let message): return message
@@ -76,13 +78,14 @@ final class SourceScanViewModel: ObservableObject {
 
     /// 启动/恢复一次扫描：mode 决定档位；batchSize 决定单次请求分析的章数（1 = 逐章）。
     /// doneIndexes 从 SourceScanCache 恢复
-    func start(graphText: String, title: String, mode: ScanMode, batchSize: Int = 1) {
+    func start(graphText: String, title: String, mode: ScanMode, batchSize: Int = 1, continuation: Bool = false) {
         guard phase == .idle || phase == .paused || isFailed else { return }
         sourceText = graphText
         sourceTitle = title
         sourceChars = graphText.count
         currentMode = mode
         self.batchSize = max(1, min(batchSize, 10))
+        self.isContinuation = continuation
 
         phase = .splitting
         let chunks = SourceScanChunker.chunks(from: graphText, mode: mode)
@@ -127,7 +130,8 @@ final class SourceScanViewModel: ObservableObject {
 
     func resume() {
         guard phase == .paused else { return }
-        start(graphText: sourceText, title: sourceTitle, mode: sourceMode, batchSize: batchSize)
+        start(graphText: sourceText, title: sourceTitle, mode: sourceMode,
+              batchSize: batchSize, continuation: isContinuation)
     }
 
     func reset() {
@@ -321,8 +325,11 @@ final class SourceScanViewModel: ObservableObject {
         }
         outTotal += stageSummaries.reduce(0) { $0 + $1.count } / 2
 
-        // ---- Reduce 二段：终归并为档案（网络失败重试 3 次） ----
-        let finalMSGS = SourceReducer.finalPrompt(stageSummaries: stageSummaries, characters: [])
+        // ---- Reduce 二段：终归并（普通）/ 深度归并（续写：人物快照+伏笔+剧情弧）----
+        let analyzedChapters = (chunks.map(\.chapterIndex).max() ?? -1) + 1
+        let finalMSGS = isContinuation
+            ? SourceReducer.continuationPrompt(stageSummaries: stageSummaries, upToChapter: analyzedChapters)
+            : SourceReducer.finalPrompt(stageSummaries: stageSummaries, characters: [])
         let (finalRaw, drained) = await fetchWithRetry(finalMSGS, client: client, config: finalConfig)
         guard drained else {
             await MainActor.run { [weak self] in self?.cancel() }
@@ -334,12 +341,20 @@ final class SourceScanViewModel: ObservableObject {
         }
         outTotal += finalRaw.count / 2
 
-        guard let profile = try? SourceReducer.parseFinal(finalRaw, fallbackTitle: sourceTitle) else {
+        guard let profile = isContinuation
+            ? try? SourceReducer.parseContinuation(finalRaw, fallbackTitle: sourceTitle, upToChapter: analyzedChapters)
+            : try? SourceReducer.parseFinal(finalRaw, fallbackTitle: sourceTitle) else {
             await MainActor.run { [weak self] in
-                self?.phase = .failed("终归并产物解析失败，可稍后重试（阶段摘要已缓存）")
+                self?.phase = .failed(isContinuation
+                    ? "深度归并产物解析失败，可稍后重试（阶段摘要已缓存）"
+                    : "终归并产物解析失败，可稍后重试（阶段摘要已缓存）")
             }
             progress.finish()
             return
+        }
+        if isContinuation {
+            // 1~X 章原文存边车（主库 JSON 全量原子写，不塞多 MB 原文）
+            profile.hasSourceText = ContinuationStore.save(text: sourceText, profileID: profile.id)
         }
         profile.meta = ScanMeta(totalChapters: chunks.count, totalChars: sourceChars, scanMode: .fast)
         profile.scanState = .init(stage: .done, totalChunks: chunks.count, doneChunks: chunks.count,
