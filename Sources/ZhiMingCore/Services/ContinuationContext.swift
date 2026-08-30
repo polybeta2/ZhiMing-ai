@@ -47,7 +47,7 @@ public enum ContinuationContext {
             }
         }
         if let recent = recentText, !recent.isEmpty {
-            lines.append("【近期原文（文风与剧情锚点，续写须无缝衔接）】")
+            lines.append("【近期原文（文风锚点：严格模仿其叙事节奏、对话口吻与语气词；续写须无缝衔接前文情节）】")
             lines.append(recent)
         }
         var text = lines.joined(separator: "\n")

@@ -10,8 +10,10 @@ enum SourceScanInjection {
     static func sourceContext(profile: SourceNovelProfile, maxChars: Int) -> String? {
         guard profile.scanState.isComplete else { return nil }
         if profile.continuationFromChapter != nil {
-            // 续写档案：人物快照/伏笔/剧情弧 + 近期原文滚动注入（蓝图/细纲/写作共用此路径）
-            let recent = ContinuationStore.loadTail(profileID: profile.id, maxChars: 1200)
+            // 续写档案：人物快照/伏笔/剧情弧 + 近期原文滚动注入（蓝图/细纲/写作共用此路径）。
+            // 近期原文是文风锚点，量给足（不超过窗口一半，避免挤占档案主体）
+            let recent = ContinuationStore.loadTail(profileID: profile.id,
+                                                    maxChars: min(4000, max(1200, maxChars / 2)))
             let body = ContinuationContext.rendered(profile: profile, recentText: recent, maxChars: maxChars)
             let title = profile.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let header = title.isEmpty ? "" : "原作：《\(title)》"
