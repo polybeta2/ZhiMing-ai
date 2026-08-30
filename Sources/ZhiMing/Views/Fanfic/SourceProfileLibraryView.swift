@@ -13,6 +13,8 @@ struct ScanJob: Identifiable {
     let batchSize: Int
     let provider: ProviderConfig
     let continuation: Bool
+    /// 恢复断点键：nil = 新建任务；非 nil = 从书签恢复（沿用 SQLite 断点跳过已 done 块）
+    var presetPID: UUID? = nil
 }
 
 /// 档案扫描用途：决定归并深度与分析产物粒度
@@ -51,6 +53,7 @@ struct ScanProgressWrap: View {
             dismiss()
         }
         .onAppear {
+            if let presetPID = job.presetPID { vm.presetProfileID = presetPID }   // 断点恢复键
             vm.start(graphText: job.text, title: job.title, mode: job.mode,
                      batchSize: job.batchSize, continuation: job.continuation)
         }
@@ -80,12 +83,73 @@ struct SourceProfileLibraryView: View {
         store.sourceProfiles.sorted { $0.createdAt > $1.createdAt }
     }
 
+    // MARK: - 未完成任务恢复（退出 App 后从断点继续分析）
+
+    /// 顶部恢复横幅：存在未完成的分析任务时展示
+    private func resumeBanner(_ bm: ScanTaskBookmark) -> some View {
+        let done = SourceScanCache.doneIndexes(profile: bm.pid).count
+        let modeLabel = ScanMode(rawValue: bm.modeRaw) == .full ? "精扫" : "快扫"
+        return HStack(spacing: AppTheme.spacing[2]) {
+            Image(systemName: "play.circle.fill")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("未完成的分析：\(bm.title)")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text("已分析 \(done) / \(bm.totalChunks) 块 · \(modeLabel) · \(bm.isContinuation ? "续写" : "同人")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: 4) {
+                Button("继续") { resumeTask(bm) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                Menu {
+                    Button("放弃此任务", role: .destructive) {
+                        ScanTaskBookmark.delete(profileID: bm.pid)
+                        SourceScanCache.clear(profile: bm.pid)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.body)
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, AppTheme.spacing[3])
+        .padding(.vertical, AppTheme.spacing[2])
+        .background(Color.accentColor.opacity(0.08))
+    }
+
+    /// 从书签恢复：读回源文本 + 重建 Provider（优先库里已有的；否则按快照重建还原 Keychain 键）
+    private func resumeTask(_ bm: ScanTaskBookmark) {
+        guard let text = ScanTaskBookmark.loadText(profileID: bm.pid),
+              let mode = ScanMode(rawValue: bm.modeRaw) else { return }
+        let provider = store.providers.first(where: { $0.apiKeyID == bm.providerKeyID })
+            ?? rebuildProvider(bm)
+        activeJob = ScanJob(text: text, title: bm.title, mode: mode, batchSize: bm.batchSize,
+                            provider: provider, continuation: bm.isContinuation, presetPID: bm.pid)
+    }
+
+    private func rebuildProvider(_ bm: ScanTaskBookmark) -> ProviderConfig {
+        let p = ProviderConfig(name: bm.providerName, baseUrl: bm.providerBaseUrl, modelName: bm.providerModel)
+        p.apiKeyID = bm.providerKeyID   // Keychain 里 key 挂在此账户下，必须原样还原
+        return p
+    }
+
     var body: some View {
-        Group {
-            if store.sourceProfiles.isEmpty {
-                emptyState
-            } else {
-                profileList
+        VStack(spacing: 0) {
+            if let pending = ScanTaskBookmark.all().first {
+                resumeBanner(pending)
+            }
+            Group {
+                if store.sourceProfiles.isEmpty {
+                    emptyState
+                } else {
+                    profileList
+                }
             }
         }
         .navigationTitle("原作档案库")

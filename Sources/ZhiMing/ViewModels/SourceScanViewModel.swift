@@ -1,6 +1,9 @@
 #if os(iOS) || os(macOS)
 import Foundation
 import Combine
+#if canImport(UIKit)
+import UIKit
+#endif
 import ZhiMingCore
 
 /// 同人原作扫描流程状态机：驱动切章分块 + 逐块 Map + 两段 Reduce，
@@ -24,6 +27,11 @@ final class SourceScanViewModel: ObservableObject {
     @Published private(set) var resultProfile: SourceNovelProfile?
     /// 流式可视化：等待首Token/思考/输出统计（复用现有组件）
     let progress = StreamProgressTracker()
+
+    /// 后台任务句柄（分析中申请保活，退到后台尽量多跑一点；仅 iOS）
+    #if canImport(UIKit)
+    private var bgTask: UIBackgroundTaskIdentifier = .invalid
+    #endif
 
     private var task: Task<Void, Never>?
     private var client: OpenAICompatibleClient?
@@ -96,6 +104,13 @@ final class SourceScanViewModel: ObservableObject {
         let pid = profileID ?? presetProfileID ?? UUID()
         profileID = pid
 
+        // 任务书签：进程被杀后能识别的「未完成分析」+ 源文本（退出重进从断点续跑）
+        ScanTaskBookmark.save(text: graphText, profileID: pid, title: title, mode: mode,
+                              batchSize: self.batchSize, isContinuation: continuation,
+                              totalChunks: chunks.count, provider: provider)
+        // 分析期间向后台申请保活（退到后台系统额外给执行时间）
+        beginBackgroundTask()
+
         guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
               let baseUrl = URL(string: provider.baseUrl) else {
             phase = .failed("未配置有效的模型接口或 API Key")
@@ -125,7 +140,27 @@ final class SourceScanViewModel: ObservableObject {
         task?.cancel()
         task = nil
         progress.finish()
+        endBackgroundTask()      // 暂停：保留书签与 SQLite 缓存，可续跑
         phase = .paused
+    }
+
+    // MARK: - 后台保活（仅 iOS：申请后台执行时间，退到后台继续跑多一点）
+
+    private func beginBackgroundTask() {
+        #if canImport(UIKit)
+        endBackgroundTask()
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "ZhiMing.scan") { [weak self] in
+            self?.endBackgroundTask()
+        }
+        #endif
+    }
+
+    private func endBackgroundTask() {
+        #if canImport(UIKit)
+        guard bgTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(bgTask)
+        bgTask = .invalid
+        #endif
     }
 
     func resume() {
@@ -138,6 +173,7 @@ final class SourceScanViewModel: ObservableObject {
         task?.cancel()
         task = nil
         progress.finish()
+        endBackgroundTask()
         phase = .idle
         doneChunks = 0
         totalChunks = 0
@@ -294,6 +330,7 @@ final class SourceScanViewModel: ObservableObject {
             pos = g
         }
         guard !Task.isCancelled else {
+            endBackgroundTask()
             progress.finish()
             return
         }
@@ -320,6 +357,7 @@ final class SourceScanViewModel: ObservableObject {
             }
         }
         guard !Task.isCancelled else {
+            endBackgroundTask()
             progress.finish()
             return
         }
@@ -336,6 +374,7 @@ final class SourceScanViewModel: ObservableObject {
             return
         }
         guard !Task.isCancelled else {
+            endBackgroundTask()
             progress.finish()
             return
         }
@@ -350,6 +389,7 @@ final class SourceScanViewModel: ObservableObject {
                     : "终归并产物解析失败，可稍后重试（阶段摘要已缓存）")
             }
             progress.finish()
+            endBackgroundTask()
             return
         }
         if isContinuation {
@@ -367,6 +407,8 @@ final class SourceScanViewModel: ObservableObject {
             self.store.upsertSourceProfile(profile)
             self.phase = .done
         }
+        ScanTaskBookmark.delete(profileID: pid)   // 完成：任务书签补上断点入口移除
+        endBackgroundTask()
         progress.finish()
     }
 
