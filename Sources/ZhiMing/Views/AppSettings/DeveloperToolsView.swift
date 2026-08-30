@@ -216,7 +216,7 @@ struct TagEditView: View {
         Form {
             Section("基本信息") {
                 TextField("标签名（如：赛博朋克）", text: $name)
-                TextField("触发关键词（逗号分隔，含标签名可不填）", text: $keywordsText)
+                MultilineField(text: $keywordsText, placeholder: "触发关键词（逗号分隔，含标签名可不填）", minHeight: 20, maxLines: 3)
             }
             Section(footer: Text("用户启用该标签且创意输入命中任一关键词时，这段内容会作为创作方向约束拼入蓝图生成的系统提示词。上限 \(PromptLimits.maxTagPresetChars) 字，保存时超长部分自动截断；多条命中标签的合计注入量另有 \(PromptLimits.matchedSupplementCap) 字熔断。")) {
                 MultilineField(text: $presetText, placeholder: "完整预设提示词内容…", minHeight: 200)

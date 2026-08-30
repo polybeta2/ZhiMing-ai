@@ -241,11 +241,16 @@ struct StringListEditor: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.subheadline)
             ForEach(items.indices, id: \.self) { index in
-                HStack {
-                    TextField("规则 \(index + 1)", text: Binding(
-                        get: { items[index] },
-                        set: { items[index] = $0; onChange() }
-                    ))
+                HStack(alignment: .top) {
+                    MultilineField(
+                        text: Binding(
+                            get: { items[index] },
+                            set: { items[index] = $0; onChange() }
+                        ),
+                        placeholder: "规则 \(index + 1)",
+                        minHeight: 20,
+                        maxLines: 3
+                    )
                     Button {
                         items.remove(at: index)
                         onChange()
