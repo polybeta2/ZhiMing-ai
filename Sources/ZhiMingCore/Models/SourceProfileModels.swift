@@ -55,17 +55,22 @@ public struct CanonCharacter: Codable, Identifiable, Equatable {
     public var appearance: String?
     public var personality: String?
     public var abilities: String?
+    /// 截至分析终点的现状快照（续写档案核心：等级/能力/装备/心理/关系现状）
+    public var currentState: String?
     public var relationships: [CanonRelationship] = []
     public var arc: [CanonArc] = []
 
     public init(name: String, aliases: [String] = [], role: String? = nil, oneLine: String? = nil,
-                appearance: String? = nil, personality: String? = nil, abilities: String? = nil) {
+                appearance: String? = nil, personality: String? = nil, abilities: String? = nil,
+                currentState: String? = nil) {
         self.name = name; self.aliases = aliases; self.role = role; self.oneLine = oneLine
         self.appearance = appearance; self.personality = personality; self.abilities = abilities
+        self.currentState = currentState
     }
 
     public enum CodingKeys: String, CodingKey {
-        case id, name, aliases, role, oneLine, appearance, personality, abilities, relationships, arc
+        case id, name, aliases, role, oneLine, appearance, personality, abilities,
+             currentState = "current_state", relationships, arc
     }
 
     public init(from decoder: Decoder) throws {
@@ -78,6 +83,7 @@ public struct CanonCharacter: Codable, Identifiable, Equatable {
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance)
         personality = try c.decodeIfPresent(String.self, forKey: .personality)
         abilities = try c.decodeIfPresent(String.self, forKey: .abilities)
+        currentState = try c.decodeIfPresent(String.self, forKey: .currentState)
         relationships = try c.decodeIfPresent([CanonRelationship].self, forKey: .relationships) ?? []
         arc = try c.decodeIfPresent([CanonArc].self, forKey: .arc) ?? []
     }
@@ -168,6 +174,11 @@ public final class SourceNovelProfile: Identifiable, ObservableObject, Codable, 
     @Published public var worldbuilding: [CanonWorldEntry] = []
     @Published public var styleProfileID: UUID?
     @Published public var scanState: ScanState
+    // 续写字段（nil/空 = 普通全书档案）
+    @Published public var continuationFromChapter: Int? = nil
+    @Published public var openThreads: [CanonThread] = []
+    @Published public var plotArc: String? = nil
+    @Published public var hasSourceText: Bool = false
 
     public init(id: UUID = UUID(), title: String, author: String? = nil) {
         self.id = id
@@ -179,7 +190,8 @@ public final class SourceNovelProfile: Identifiable, ObservableObject, Codable, 
     }
 
     public enum CodingKeys: String, CodingKey {
-        case id, title, author, createdAt, meta, characters, timeline, worldbuilding, styleProfileID, scanState
+        case id, title, author, createdAt, meta, characters, timeline, worldbuilding, styleProfileID,
+             scanState, continuationFromChapter, openThreads, plotArc, hasSourceText
     }
 
     public required init(from decoder: Decoder) throws {
@@ -194,6 +206,10 @@ public final class SourceNovelProfile: Identifiable, ObservableObject, Codable, 
         worldbuilding = try c.decodeIfPresent([CanonWorldEntry].self, forKey: .worldbuilding) ?? []
         styleProfileID = try c.decodeIfPresent(UUID.self, forKey: .styleProfileID)
         scanState = try c.decodeIfPresent(ScanState.self, forKey: .scanState) ?? ScanState()
+        continuationFromChapter = try c.decodeIfPresent(Int.self, forKey: .continuationFromChapter)
+        openThreads = try c.decodeIfPresent([CanonThread].self, forKey: .openThreads) ?? []
+        plotArc = try c.decodeIfPresent(String.self, forKey: .plotArc)
+        hasSourceText = try c.decodeIfPresent(Bool.self, forKey: .hasSourceText) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -208,6 +224,10 @@ public final class SourceNovelProfile: Identifiable, ObservableObject, Codable, 
         try c.encode(worldbuilding, forKey: .worldbuilding)
         try c.encodeIfPresent(styleProfileID, forKey: .styleProfileID)
         try c.encode(scanState, forKey: .scanState)
+        try c.encodeIfPresent(continuationFromChapter, forKey: .continuationFromChapter)
+        try c.encode(openThreads, forKey: .openThreads)
+        try c.encodeIfPresent(plotArc, forKey: .plotArc)
+        try c.encode(hasSourceText, forKey: .hasSourceText)
     }
 
     public static func == (l: SourceNovelProfile, r: SourceNovelProfile) -> Bool { l.id == r.id }
