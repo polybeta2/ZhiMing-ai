@@ -26,8 +26,9 @@ public enum SourceBatchHelper {
         var lines: [String] = []
         lines.append("【任务】你是小说内容分析师。下面是《\(book)》第 \(first)-\(last) 章的正文（共 \(chapters.count) 章）。")
         lines.append("请逐章输出「增量式微摘要」JSON：每章输出【一行】JSON 对象，章与章之间用换行分隔；除此之外不要输出任何内容（不要解释、不要代码块围栏、不要编号）。")
-        lines.append("每章 JSON 格式（只记录本章「新增或变化」的信息：新角色、性格/能力表现、状态变化、发生的事件、新确立的设定；不要复述前文已知内容；本章无新增则对应字段给空数组）：")
-        lines.append(#"{"chapter": <本章序号>, "characters": [{"name": "", "traits": "", "state_change": ""}], "events": [{"summary": "", "participants": []}], "worldbuilding": [{"name": "", "content": ""}]}"#)
+        lines.append("每章 JSON 格式（只记录本章「新增或变化」的信息：新角色、性格/能力表现、状态变化、发生的事件、新确立的设定、新埋或回收的伏笔；不要复述前文已知内容；本章无新增则对应字段给空数组）：")
+        lines.append(#"{"chapter": <本章序号>, "characters": [{"name": "", "traits": "", "state_change": ""}], "events": [{"summary": "", "participants": []}], "worldbuilding": [{"name": "", "content": ""}], "foreshadowing": [{"summary": "本章新埋或回收的伏笔一句话", "planted": true}]}"#)
+        lines.append("伏笔规则：本章新埋的记 planted=true（含线索）；本章回收（悬念解除）的记 planted=false；无则空数组。")
         lines.append("")
         for c in chapters {
             lines.append(chapterBlock(index: c.index, title: c.title, body: c.body))

@@ -45,4 +45,27 @@ final class SourceMicroSummarizerTests: XCTestCase {
     func testParseFailsOnGarbage() {
         XCTAssertThrowsError(try SourceMicroSummarizer.parse("不是JSON"))
     }
+
+    func testParseForeshadowing() throws {
+        let json = """
+        {"characters":[],"events":[],"worldbuilding":[],
+         "foreshadowing":[{"summary":"神秘黑袍人留下令牌","planted":true},{"summary":"山贼头目的宝藏地图悬念解除","planted":false}]}
+        """
+        let micro = try SourceMicroSummarizer.parse(json)
+        XCTAssertEqual(micro.foreshadowing.count, 2)
+        XCTAssertEqual(micro.foreshadowing[0].summary, "神秘黑袍人留下令牌")
+        XCTAssertTrue(micro.foreshadowing[0].planted)
+        XCTAssertFalse(micro.foreshadowing[1].planted)
+    }
+
+    func testParseLegacyMicroSummaryWithoutForeshadowing() throws {
+        let json = #"{"characters":[],"events":[],"worldbuilding":[]}"#
+        let micro = try SourceMicroSummarizer.parse(json)
+        XCTAssertTrue(micro.foreshadowing.isEmpty)
+    }
+
+    func testSystemPromptMentionsForeshadowing() {
+        let msgs = SourceMicroSummarizer.messages(chunk: "正文", chapterMarker: "第1章")
+        XCTAssertTrue(msgs[0].content.contains("foreshadowing"))
+    }
 }
