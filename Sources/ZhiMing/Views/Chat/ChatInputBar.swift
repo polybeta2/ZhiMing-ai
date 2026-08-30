@@ -20,7 +20,8 @@ struct ChatInputBar: View {
                 text: $text,
                 placeholder: placeholder,
                 minHeight: 22,
-                maxLines: 5
+                maxLines: 5,
+                minLines: 2          // 空态保底 2 行，避免在 iOS 26 布局下塌缩/撑爆
             )
             .padding(.horizontal, AppTheme.spacing[3])
             .padding(.vertical, 9)

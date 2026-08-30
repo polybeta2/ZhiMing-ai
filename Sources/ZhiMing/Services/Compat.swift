@@ -41,15 +41,18 @@ struct MultilineField: View {
     var minHeight: CGFloat = 66
     var maxLines: Int? = nil
     var fixedHeight: CGFloat? = nil
+    /// 空态保底行数（如助手输入条空态 2 行），按实际字体行高换算
+    var minLines: Int? = nil
     var textStyle: UIFont.TextStyle = .body
 
     var body: some View {
         let uiFont = UIFont.preferredFont(forTextStyle: textStyle)
+        let effectiveMin = minLines.map { max(minHeight, uiFont.lineHeight * CGFloat($0)) } ?? minHeight
         return ZStack(alignment: .topLeading) {
             GrowingTextView(
                 text: $text,
                 textStyle: textStyle,
-                minHeight: minHeight,
+                minHeight: effectiveMin,
                 maxLines: maxLines,
                 fixedHeight: fixedHeight
             )
@@ -119,7 +122,10 @@ private final class GrowingUITextView: UITextView {
     private var lastWidth: CGFloat = 0
 
     private var contentHeight: CGFloat {
-        sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
+        // 布局首帧宽度尚未就绪时 sizeThatFits(width:0) 会把每个字折成一行算出爆表高度，
+        // 导致输入框首帧撑满整屏；宽度就绪前以最小高度兜底
+        guard bounds.width > 1 else { return minHeight }
+        return sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
     }
 
     private var capHeight: CGFloat? {
