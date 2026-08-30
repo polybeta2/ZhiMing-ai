@@ -11,11 +11,16 @@ public struct BuiltContext {
 }
 
 /// 三级上下文装配（司命 context_orchestrator 的简化版）：
-/// 必需层（不参与预算裁剪）：风格约束、本章细纲、正文末尾 800 字
+/// 必需层（不参与预算裁剪）：风格约束、上一章正文末尾（衔接锚点）、本章细纲、
+/// 场景卡、下一章细纲开头（落点约束）、正文末尾 800 字
 /// 高优先层：最近 3 章摘要 + 关键事实
 /// 可选层（超预算时先裁）：场景角色卡（≤12）、世界观条目（≤8）
 public enum ContextBuilder {
     public static let tailLength = 800
+    /// 上一章正文末尾的截取长度（衔接只需最后时刻，600 字足够）
+    public static let neighborTailLength = 600
+    /// 下一章细纲开头的截取长度（知道往哪儿收即可，不整段搬运）
+    public static let nextOutlineHeadLength = 160
     public static let maxSceneCharacters = 12
     public static let maxWorldEntries = 8
 
@@ -28,6 +33,39 @@ public enum ContextBuilder {
         guard text.count > limit else { return text }
         truncated.append("\(label)（超过 \(limit) 字，已截断保留末尾）")
         return "……" + String(text.suffix(limit))
+    }
+
+    // MARK: - 章间衔接锚点（P2.6：写作时注入 X-1 正文末尾与 X+1 细纲开头）
+
+    /// 【上一章正文末尾】：写 X 章时的衔接锚点——摘要转述不了「最后一刻」，
+    /// 语气、人物姿态、悬而未落的动作只有正文能承接。前一章无正文（跳章写作）则省略。
+    private static func appendPrevProseTail(chapter: Chapter, novel: Novel, required: inout [String]) {
+        let ordered = novel.allChaptersInOrder
+        guard let index = ordered.firstIndex(where: { $0.id == chapter.id }), index > 0 else { return }
+        let prev = ordered[index - 1]
+        guard !prev.content.isEmpty else { return }
+        var tail = prev.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tail.isEmpty else { return }
+        if tail.count > neighborTailLength {
+            tail = String(tail.suffix(neighborTailLength))
+        }
+        required.append("【上一章正文末尾】\n……" + tail)
+    }
+
+    /// 【下一章细纲（开头走向）】：写 X 章时的落点约束——本章结尾必须停在 X+1 开场
+    /// 需要的状态，且不得提前执行 X+1 的事件。X+1 未建或无细纲则省略。
+    private static func appendNextOutlineHead(chapter: Chapter, novel: Novel, required: inout [String]) {
+        let ordered = novel.allChaptersInOrder
+        guard let index = ordered.firstIndex(where: { $0.id == chapter.id }),
+              index + 1 < ordered.count else { return }
+        let next = ordered[index + 1]
+        guard let outline = next.detailedOutline?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !outline.isEmpty else { return }
+        var head = outline
+        if head.count > nextOutlineHeadLength {
+            head = String(head.prefix(nextOutlineHeadLength)) + "……"
+        }
+        required.append("【下一章细纲（开头走向）】\n\(head)")
     }
 
     public static func buildContinueContext(chapter: Chapter, novel: Novel, budgetChars: Int,
@@ -45,6 +83,7 @@ public enum ContextBuilder {
             // 文风档案卡（渲染器已按 PromptLimits.styleProfileCap 截断，此处不再裁剪）
             required.append(card)
         }
+        appendPrevProseTail(chapter: chapter, novel: novel, required: &required)
         if let outline = chapter.detailedOutline, !outline.isEmpty {
             required.append("【本章细纲】\n"
                 + cappedRequired(outline, label: "本章细纲", truncated: &truncated))
@@ -55,6 +94,7 @@ public enum ContextBuilder {
             required.append("【场景卡】\n"
                 + cappedRequired(rendered, label: "场景卡", truncated: &truncated))
         }
+        appendNextOutlineHead(chapter: chapter, novel: novel, required: &required)
 
         let previous = previousSummaries(of: chapter, in: novel, limit: 3)
         if !previous.isEmpty {
