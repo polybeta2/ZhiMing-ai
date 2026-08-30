@@ -30,14 +30,14 @@ struct EmptyStateView: View {
     }
 }
 
-/// 自适应多行输入：UITextView 内核 + 高度由 SwiftUI 层显式 frame 锁死。
-/// iOS 26/LiveContainer 上桥接层不查询 UITextView 的 intrinsicContentSize（UIScrollView
-/// 类视图会被直接拉伸到全部可用空间，即"占满整屏"根因），因此内容高度必须实测回传、
-/// 在 SwiftUI 侧用 .frame(height:) 确定，不参与任何桥接尺寸协商。
-/// - minHeight：最小高度；maxLines：封顶行数（超出内部滚动）
-/// - fixedHeight / fixedLines：固定高度模式（像素 / 按行随动态字体缩放）
-/// - minLines：最小高度按行折算
-/// - textStyle：文本样式（统一生效）
+/// 自适应多行输入：SwiftUI 原生 TextEditor + Text 镜像测高 + frame 锁死。
+/// iOS 26/LiveContainer 上 UIViewRepresentable 桥接不可靠（delegate 不回调 → binding 不更新、
+/// 高度不回传，即"输入不进状态/按钮不可点/高度不变"的根因），故全部改用 SwiftUI 原生设施：
+/// - text binding：TextEditor 原生绑定，输入即时生效（发送按钮/placeholder 即时响应）
+/// - 高度：镜像 Text（同字体同宽）经 GeometryReader 实测 → .frame(height:) 锁定，
+///   内容超出封顶行数后 TextEditor 自动内部滚动
+/// - minHeight / minLines / maxLines / fixedHeight / fixedLines 参数语义同前
+/// - textStyle：统一折算字体（动态字体可缩放）
 struct MultilineField: View {
     @Binding var text: String
     var placeholder: String = ""
@@ -48,155 +48,60 @@ struct MultilineField: View {
     var fixedLines: Int? = nil
     var textStyle: UIFont.TextStyle = .body
 
-    /// UITextView 实测的内容高度（宽度就绪后回传；首帧为 0 → 取最小高度）
-    @State private var measuredHeight: CGFloat = 0
+    /// 镜像 Text 实测的内容高度（含模拟内边距）
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         let uiFont = UIFont.preferredFont(forTextStyle: textStyle)
-        let effectiveMin = minLines.map { max(minHeight, uiFont.lineHeight * CGFloat($0)) } ?? minHeight
-        let effectiveFixed = fixedLines.map { uiFont.lineHeight * CGFloat($0) } ?? fixedHeight
-        let cap = maxLines.map { uiFont.lineHeight * CGFloat($0) }
+        let font = Font.system(size: uiFont.pointSize)
+        let lineHeight = uiFont.lineHeight
+        let effectiveMin = minLines.map { max(minHeight, lineHeight * CGFloat($0)) } ?? minHeight
+        let effectiveFixed = fixedLines.map { lineHeight * CGFloat($0) } ?? fixedHeight
+        let cap = maxLines.map { lineHeight * CGFloat($0) }
         // 最终高度：固定模式恒定；自适应模式 = clamp(实测, 最小, 封顶)
         let targetHeight: CGFloat
         if let fixed = effectiveFixed {
             targetHeight = fixed
         } else if let cap {
-            targetHeight = min(max(measuredHeight, effectiveMin), cap)
+            targetHeight = min(max(contentHeight, effectiveMin), cap)
         } else {
-            targetHeight = max(measuredHeight, effectiveMin)
+            targetHeight = max(contentHeight, effectiveMin)
         }
-        return GrowingTextView(
-            text: $text,
-            placeholder: placeholder,
-            textStyle: textStyle,
-            capHeight: cap,
-            fixedHeight: effectiveFixed,
-            onMeasure: { h in
-                if abs(h - measuredHeight) > 0.5 { measuredHeight = h }
+
+        return ZStack(alignment: .topLeading) {
+            // 测量镜像：与 TextEditor 同字体同宽（padding 模拟 TextEditor 内边距），高度即内容所需
+            Text(text + " ")
+                .font(font)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 6)
+                .hidden()
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { contentHeight = geo.size.height }
+                            .zmOnChange(of: geo.size.height) { contentHeight = $0 }
+                    }
+                )
+            Group {
+                if #available(iOS 16.0, *) {
+                    TextEditor(text: $text)
+                        .scrollContentBackground(.hidden)
+                } else {
+                    // iOS 15：保留默认背景（用户未在该版本验证视觉）
+                    TextEditor(text: $text)
+                }
             }
-        )
-        .frame(height: targetHeight)   // ★ 高度在此锁死，桥接协商失效也无妨
-    }
-}
-
-/// UITextView 内核：测量内容高度回传 SwiftUI；封顶/固定模式下开启内部滚动。
-/// placeholder 为 UIKit 内置 label，直接跟随 UITextView 实际内容隐藏（不依赖 SwiftUI binding 同步）
-private struct GrowingTextView: UIViewRepresentable {
-    @Binding var text: String
-    var placeholder: String = ""
-    var textStyle: UIFont.TextStyle
-    var capHeight: CGFloat?
-    var fixedHeight: CGFloat?
-    var onMeasure: (CGFloat) -> Void
-
-    func makeUIView(context: Context) -> GrowingUITextView {
-        let tv = GrowingUITextView()
-        tv.delegate = context.coordinator
-        tv.backgroundColor = .clear
-        tv.textContainerInset = .zero
-        tv.textContainer.lineFragmentPadding = 0
-        tv.isScrollEnabled = false
-        tv.font = UIFont.preferredFont(forTextStyle: textStyle)
-        tv.textColor = .label
-        tv.refreshPlaceholder(text: placeholder)
-        return tv
-    }
-
-    func updateUIView(_ tv: GrowingUITextView, context: Context) {
-        tv.onMeasure = onMeasure
-        tv.refreshPlaceholder(text: placeholder)
-        // 拼音等 IME 组合期间（markedTextRange 非空）不用绑定反向覆盖，避免打断输入
-        if tv.markedTextRange == nil, tv.text != text {
-            let selection = tv.selectedTextRange
-            tv.text = text
-            if let selection { tv.selectedTextRange = selection }
-        }
-        let font = UIFont.preferredFont(forTextStyle: textStyle)
-        if tv.font != font {
-            tv.font = font
-            tv.syncPlaceholderFont(font)
-        }
-        if tv.capHeight != capHeight { tv.capHeight = capHeight }
-        if tv.fixedHeight != fixedHeight { tv.fixedHeight = fixedHeight }
-        tv.measureAndReport()
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, UITextViewDelegate {
-        var parent: GrowingTextView
-        init(_ parent: GrowingTextView) { self.parent = parent }
-
-        func textViewDidChange(_ tv: GrowingUITextView) {
-            parent.text = tv.text
-            tv.refreshPlaceholder(text: tv.placeholderText)
-            tv.measureAndReport()
-        }
-    }
-}
-
-private final class GrowingUITextView: UITextView {
-    var capHeight: CGFloat?
-    var fixedHeight: CGFloat?
-    var onMeasure: ((CGFloat) -> Void)?
-
-    private var lastWidth: CGFloat = 0
-
-    private(set) var placeholderText: String = ""
-    private let placeholderLabel = UILabel()
-
-    override init(frame: CGRect, textContainer: NSTextContainer?) {
-        super.init(frame: frame, textContainer: textContainer)
-        placeholderLabel.font = UIFont.preferredFont(forTextStyle: .body)
-        placeholderLabel.textColor = .placeholderText
-        placeholderLabel.numberOfLines = 0
-        placeholderLabel.isUserInteractionEnabled = false
-        placeholderLabel.isHidden = true
-        addSubview(placeholderLabel)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    /// 更新 placeholder 文案并跟随实际内容显隐（不依赖 SwiftUI binding）
-    func refreshPlaceholder(text: String) {
-        placeholderText = text
-        placeholderLabel.text = text
-        placeholderLabel.isHidden = !self.text.isEmpty
-    }
-
-    /// 输入文本与 placeholder 用同一字体（动态字号变化时同步）
-    func syncPlaceholderFont(_ font: UIFont) {
-        placeholderLabel.font = font
-    }
-
-    /// 实测内容高度并回传（宽度未就绪时不测，避免 sizeThatFits(width:0) 爆表）
-    func measureAndReport() {
-        guard bounds.width > 1 else { return }
-        let h = sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
-        onMeasure?(h)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        // placeholder label 与输入文本同起点（textContainerInset=0, lineFragmentPadding=0）
-        placeholderLabel.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
-        // 宽度变化（旋转/布局/字体）后重新测量回传
-        if bounds.width != lastWidth {
-            lastWidth = bounds.width
-            measureAndReport()
-        }
-        // 固定高度或内容超封顶 → 内部滚动；否则交给外层（frame 已锁死高度，此处仅控制滚动开关）
-        let wantsScroll: Bool
-        if fixedHeight != nil {
-            wantsScroll = true
-        } else if let cap = capHeight {
-            wantsScroll = sizeThatFits(CGSize(width: max(bounds.width, 1), height: .greatestFiniteMagnitude)).height > cap
-        } else {
-            wantsScroll = false
-        }
-        if isScrollEnabled != wantsScroll {
-            isScrollEnabled = wantsScroll
+            .font(font)
+            .frame(height: targetHeight)   // ★ 高度在此锁死
+            if text.isEmpty {
+                Text(placeholder)
+                    .font(font)
+                    .foregroundStyle(Color(uiColor: .placeholderText))
+                    .padding(.leading, 5)
+                    .padding(.top, 8)
+                    .allowsHitTesting(false)
+            }
         }
     }
 }
