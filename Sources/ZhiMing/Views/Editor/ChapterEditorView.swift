@@ -528,7 +528,7 @@ private struct ContinueWritingSheet: View {
     private let newChapterOptions = Array(stride(from: 1500, through: 4500, by: 500))
     private let continueOptions = [800, 1500, 2500]
 
-    init(isNewChapter: Bool, hasOutline: Bool = true, onStart: @escaping (Int, String?) -> Void) {
+    init(isNewChapter: Bool, hasOutline: Bool = true, onStart: @escaping (Int, String?, Bool) -> Void) {
         self.isNewChapter = isNewChapter
         self.hasOutline = hasOutline
         self.onStart = onStart

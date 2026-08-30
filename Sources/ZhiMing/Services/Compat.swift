@@ -30,40 +30,141 @@ struct EmptyStateView: View {
     }
 }
 
-/// TextField(axis: .vertical) 的 iOS 15 等价物：TextEditor 基多行输入
+/// 自适应多行输入：iOS 16+ 用原生 TextField(axis: .vertical)，iOS 15 用 UITextView 自增高。
+/// - minHeight：空态/最小高度
+/// - maxLines：nil = 不封顶（随内容长高，交给外层页面滚动）；设值则封顶后内部滚动
+/// - textStyle：仅 iOS 15 的 UITextView 路径生效（iOS 16+ 字体由外部 .font 环境修饰符控制）
 struct MultilineField: View {
     @Binding var text: String
     var placeholder: String = ""
     var minHeight: CGFloat = 66
+    var maxLines: Int? = nil
+    var textStyle: UIFont.TextStyle = .body
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        if #available(iOS 16.0, *) {
+            ios16Field
+                .frame(minHeight: minHeight, alignment: .topLeading)
+        } else {
+            ios15Field
+        }
+    }
+
+    @available(iOS 16.0, *)
+    @ViewBuilder
+    private var ios16Field: some View {
+        if let maxLines {
+            TextField(placeholder, text: $text, axis: .vertical)
+                .lineLimit(1...maxLines)
+        } else {
+            TextField(placeholder, text: $text, axis: .vertical)
+        }
+    }
+
+    private var ios15Field: some View {
+        let uiFont = UIFont.preferredFont(forTextStyle: textStyle)
+        return ZStack(alignment: .topLeading) {
+            GrowingTextView(
+                text: $text,
+                textStyle: textStyle,
+                minHeight: minHeight,
+                maxLines: maxLines
+            )
             if text.isEmpty {
                 Text(placeholder)
+                    .font(Font.system(size: uiFont.pointSize))
                     .foregroundStyle(Color(uiColor: .placeholderText))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 8)
                     .allowsHitTesting(false)
             }
-            TextEditor(text: $text)
-                .frame(minHeight: minHeight)
-                .scrollContentBackgroundCompat()
         }
     }
 }
 
-/// TextEditor 背景清理：iOS 16+ 用 scrollContentBackground，iOS 15 由全局
-/// UITextView.appearance().backgroundColor = .clear 兜底（见 ZhiMingApp.init）
-extension View {
-    @ViewBuilder
-    func scrollContentBackgroundCompat() -> some View {
-        if #available(iOS 16.0, *) {
-            self.scrollContentBackground(.hidden)
-        } else {
-            self
-        }
+/// iOS 15 的自增高 UITextView：内容多高框就多高，超过 maxLines 封顶并开启内部滚动
+private struct GrowingTextView: UIViewRepresentable {
+    @Binding var text: String
+    var textStyle: UIFont.TextStyle
+    var minHeight: CGFloat
+    var maxLines: Int?
+
+    func makeUIView(context: Context) -> GrowingUITextView {
+        let tv = GrowingUITextView()
+        tv.delegate = context.coordinator
+        tv.backgroundColor = .clear
+        tv.textContainerInset = .zero
+        tv.textContainer.lineFragmentPadding = 0
+        tv.isScrollEnabled = false
+        tv.font = UIFont.preferredFont(forTextStyle: textStyle)
+        tv.textColor = .label
+        return tv
     }
 
+    func updateUIView(_ tv: GrowingUITextView, context: Context) {
+        // 拼音等 IME 组合期间（markedTextRange 非空）不用绑定反向覆盖，避免打断输入
+        if tv.markedTextRange == nil, tv.text != text {
+            let selection = tv.selectedTextRange
+            tv.text = text
+            if let selection { tv.selectedTextRange = selection }
+        }
+        let font = UIFont.preferredFont(forTextStyle: textStyle)
+        if tv.font != font { tv.font = font }
+        if tv.minHeight != minHeight { tv.minHeight = minHeight }
+        if tv.maxLines != maxLines { tv.maxLines = maxLines }
+        tv.invalidateIntrinsicContentSize()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: GrowingTextView
+        init(_ parent: GrowingTextView) { self.parent = parent }
+
+        func textViewDidChange(_ tv: UITextView) {
+            parent.text = tv.text
+            tv.invalidateIntrinsicContentSize()
+        }
+    }
+}
+
+private final class GrowingUITextView: UITextView {
+    var minHeight: CGFloat = 0
+    var maxLines: Int?
+
+    private var lastWidth: CGFloat = 0
+
+    private var contentHeight: CGFloat {
+        sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
+    }
+
+    private var capHeight: CGFloat? {
+        guard let maxLines else { return nil }
+        let lineHeight = font?.lineHeight ?? UIFont.preferredFont(forTextStyle: .body).lineHeight
+        return lineHeight * CGFloat(maxLines)
+    }
+
+    override var intrinsicContentSize: CGSize {
+        var height = max(contentHeight, minHeight)
+        if let cap = capHeight, height > cap { height = cap }
+        return CGSize(width: UIView.noIntrinsicMetric, height: height)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // 宽度变化（旋转/布局）后内容测量失效，重新触发尺寸协商
+        if bounds.width != lastWidth {
+            lastWidth = bounds.width
+            invalidateIntrinsicContentSize()
+        }
+        // 封顶后允许内部滚动；未封顶保持不滚，让外层页面接管
+        let wantsScroll = (capHeight.map { contentHeight > $0 }) ?? false
+        if isScrollEnabled != wantsScroll {
+            isScrollEnabled = wantsScroll
+            invalidateIntrinsicContentSize()
+        }
+    }
+}
+
+extension View {
     /// 两参 onChange 的单参兼容版（语义：拿到新值）
     func zmOnChange<V: Equatable>(of value: V, perform action: @escaping (V) -> Void) -> some View {
         onChange(of: value) { newValue in action(newValue) }

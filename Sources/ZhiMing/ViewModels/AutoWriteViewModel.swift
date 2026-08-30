@@ -76,6 +76,7 @@ final class AutoWriteViewModel: ObservableObject {
                 self.completedTitles.append(chapter.title)
                 store.save()
             }
+            guard let self else { return }
             self.finish(.done)
         }
     }
