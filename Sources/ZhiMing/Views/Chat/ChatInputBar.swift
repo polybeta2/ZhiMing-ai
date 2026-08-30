@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// 多行输入 + 发送/停止（流式中发送键变停止键），iMessage 式胶囊输入框
-/// iOS 15 兼容：无 TextField(axis:)，使用单行输入（多行长文本场景由 MultilineField 承担）
+/// 胶囊随内容长高，最多 5 行后内部滚动；iOS 15 走 UITextView 自增高，iOS 16+ 走原生 axis.vertical
 struct ChatInputBar: View {
     @Binding var text: String
     var isStreaming = false
@@ -16,9 +16,12 @@ struct ChatInputBar: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: AppTheme.spacing[1]) {
-            HStack(spacing: AppTheme.spacing[1]) {
-                TextField(placeholder, text: $text)
-            }
+            MultilineField(
+                text: $text,
+                placeholder: placeholder,
+                minHeight: 22,
+                maxLines: 5
+            )
             .padding(.horizontal, AppTheme.spacing[3])
             .padding(.vertical, 9)
             .background(
