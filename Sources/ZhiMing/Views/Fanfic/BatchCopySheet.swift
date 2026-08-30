@@ -10,6 +10,10 @@ struct BatchCopySheet: View {
     let text: String
     let bookTitle: String
     let store: AppStore
+    /// 续写模式：归并走深度归并并写原文边车
+    private let continuation: Bool
+    /// 续写归并完成回调（续写导入页建书用；普通通道为 nil）
+    private let onProfileReady: ((SourceNovelProfile) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     /// 归并专用 VM（presetProfileID 复用批量落库的断点键）
@@ -29,10 +33,13 @@ struct BatchCopySheet: View {
 
     private let batchOptions = [5, 10, 20, 30, 50]
 
-    init(text: String, bookTitle: String, store: AppStore) {
+    init(text: String, bookTitle: String, store: AppStore,
+         continuation: Bool = false, onProfileReady: ((SourceNovelProfile) -> Void)? = nil) {
         self.text = text
         self.bookTitle = bookTitle
         self.store = store
+        self.continuation = continuation
+        self.onProfileReady = onProfileReady
         let chunks = SourceScanChunker.chunks(from: text, mode: .full)
         // 同章多块合并为一段（分析覆盖整章；缓存按 chunks 的 pos 分别标记 done）
         var order: [Int] = []
@@ -73,7 +80,10 @@ struct BatchCopySheet: View {
         CompatNavigationView {
             Group {
                 if merging {
-                    SourceScanProgressSheet(vm: vm) { _ in dismiss() }
+                    SourceScanProgressSheet(vm: vm) { profile in
+                        if let profile { onProfileReady?(profile) }
+                        dismiss()
+                    }
                 } else {
                     mainForm
                 }
@@ -212,7 +222,7 @@ struct BatchCopySheet: View {
     private func startMerge() {
         vm.presetProfileID = pid
         merging = true
-        vm.start(graphText: text, title: bookTitle, mode: .full)
+        vm.start(graphText: text, title: bookTitle, mode: .full, continuation: continuation)
     }
 }
 #endif

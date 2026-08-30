@@ -5,13 +5,14 @@ import CoreFoundation
 import ZhiMingCore
 
 /// 一次扫描任务（sheet identity：进入即建 VM 并启动扫描）
-private struct ScanJob: Identifiable {
+struct ScanJob: Identifiable {
     let id = UUID()
     let text: String
     let title: String
     let mode: ScanMode
     let batchSize: Int
     let provider: ProviderConfig
+    let continuation: Bool
 }
 
 /// 待分析文件信息（档位选择页展示章数/字数用；批量模式复用）
@@ -22,25 +23,29 @@ private struct PendingFile: Identifiable {
     let chapterCount: Int
 }
 
-/// 扫描进度承载视图：负责持有 VM 生命周期
-private struct ScanProgressWrap: View {
+/// 扫描进度承载视图：负责持有 VM 生命周期（档案库与续写导入共用）
+struct ScanProgressWrap: View {
     let job: ScanJob
     let store: AppStore
+    var onProfileReady: ((SourceNovelProfile) -> Void)? = nil
     @StateObject private var vm: SourceScanViewModel
     @Environment(\.dismiss) private var dismiss
 
-    init(job: ScanJob, store: AppStore) {
+    init(job: ScanJob, store: AppStore, onProfileReady: ((SourceNovelProfile) -> Void)? = nil) {
         self.job = job
         self.store = store
+        self.onProfileReady = onProfileReady
         _vm = StateObject(wrappedValue: SourceScanViewModel(provider: job.provider, store: store))
     }
 
     var body: some View {
-        SourceScanProgressSheet(vm: vm) { _ in
+        SourceScanProgressSheet(vm: vm) { profile in
+            if let profile { onProfileReady?(profile) }
             dismiss()
         }
         .onAppear {
-            vm.start(graphText: job.text, title: job.title, mode: job.mode, batchSize: job.batchSize)
+            vm.start(graphText: job.text, title: job.title, mode: job.mode,
+                     batchSize: job.batchSize, continuation: job.continuation)
         }
     }
 }
@@ -233,7 +238,7 @@ struct SourceProfileLibraryView: View {
                               let pending = pendingScan else { return }
                         activeJob = ScanJob(text: pending.text, title: pending.title,
                                             mode: chosenMode, batchSize: chosenBatchSize,
-                                            provider: provider)
+                                            provider: provider, continuation: false)
                         showModePicker = false
                     }
                     .disabled(store.defaultProvider == nil)
