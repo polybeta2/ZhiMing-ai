@@ -23,9 +23,10 @@ struct ScanTaskBookmark: Codable, Identifiable {
     var startedAt: Date
 
     private static var dirURL: URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        // 与 continuations 同理：Documents 启用文件共享后只留 origins，任务书签放 Application Support
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        let dir = base.appendingPathComponent("scan_tasks", isDirectory: true)
+        let dir = base.appendingPathComponent("ZhiMing/scan_tasks", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - iOS 15 兼容层
 // 本项目部署目标为 iOS 15；此处集中提供高版本 SwiftUI API 的降级等价物。
@@ -110,6 +111,73 @@ extension View {
     /// 两参 onChange 的单参兼容版（语义：拿到新值）
     func zmOnChange<V: Equatable>(of value: V, perform action: @escaping (V) -> Void) -> some View {
         onChange(of: value) { newValue in action(newValue) }
+    }
+}
+
+// MARK: - 文件选择（iOS 15 兼容）
+// SwiftUI fileImporter 在 iOS 15 真机上有社区级 bug：文件可选（不置灰）但点选后
+// completion 静默不触发（TrollStore 侧载实测）。iOS 15 改用 UIKit
+// UIDocumentPickerViewController 直包装（delegate 在原生 iOS 15 上可靠）；
+// iOS 16+ 维持原生 fileImporter（SwiftUI 路径，规避 iOS 26 上桥接层的不确定性）。
+
+/// UIKit 文档选择器（iOS 15 专用）
+private struct UIKitDocumentPicker: UIViewControllerRepresentable {
+    let types: [UTType]
+    let onPick: (URL) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        // asCopy: 拷入临时目录，免安全作用域仪式，读取最稳（本 App 场景只读一次）
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(_ vc: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let parent: UIKitDocumentPicker
+        init(_ parent: UIKitDocumentPicker) { self.parent = parent }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            if let url = urls.first { parent.onPick(url) }
+            parent.dismiss()
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            parent.dismiss()
+        }
+    }
+}
+
+/// 双轨文件选择 modifier：iOS 16+ fileImporter / iOS 15 UIKit 包装
+struct DocumentPickerModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    let types: [UTType]
+    let onPick: (URL) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 16.0, *) {
+            content.fileImporter(isPresented: $isPresented, allowedContentTypes: types) { result in
+                if case .success(let url) = result { onPick(url) }
+            }
+        } else {
+            content.sheet(isPresented: $isPresented) {
+                UIKitDocumentPicker(types: types, onPick: onPick)
+            }
+        }
+    }
+}
+
+extension View {
+    /// 文件选择（iOS 15 兼容版 fileImporter）
+    func zmDocumentPicker(isPresented: Binding<Bool>, types: [UTType],
+                          onPick: @escaping (URL) -> Void) -> some View {
+        modifier(DocumentPickerModifier(isPresented: isPresented, types: types, onPick: onPick))
     }
 }
 

@@ -48,8 +48,8 @@ struct StyleTransferSheet: View {
                 }
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json]) { result in
-            if case .success(let url) = result { importJSON(url) }
+        .zmDocumentPicker(isPresented: $showImporter, types: [.json]) { url in
+            importJSON(url)
         }
         .sheet(item: $shareItem) { item in
             ShareSheet(items: [item.url])

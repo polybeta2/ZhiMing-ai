@@ -63,8 +63,8 @@ struct ContinuationImportSheet: View {
                 }
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .utf8PlainText]) { result in
-            if case .success(let url) = result { loadBook(url: url) }
+        .zmDocumentPicker(isPresented: $showImporter, types: [.plainText, .utf8PlainText, .text]) { url in
+            loadBook(url: url)
         }
         .sheet(isPresented: $showOriginPicker) { originPicker }
         .sheet(isPresented: $showLibPicker) { libraryPicker }

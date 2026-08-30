@@ -1,10 +1,9 @@
 #if os(iOS) || os(macOS)
 import Foundation
 
-/// 原作 txt 收纳目录（LiveContainer 不可用系统文件保存路径，故引导用户把原始 txt 放入本 App 的
-/// Documents/origins 文件夹，再在「原作档案库 → 从 origins 导入」中选取分析）。
-/// 该目录位于 App 的 Documents 下，可通过「文件 App → 我的 iPhone → 织命 → origins」或
-/// LiveContainer 的文件面板直接放文件。
+/// 原作 txt 收纳目录。该目录位于 App 的 Documents 下，Info.plist 已启用
+/// UIFileSharingEnabled —— 通过「文件 App → 浏览 → 我的 iPhone → 织命 → origins」即可放入
+/// 文件；LiveContainer 用户则在其文件面板进入本 App 的沙盒目录。
 enum SourceOriginFolder {
     /// Documents/origins（不存在则创建；失败回退临时目录并保持读使用方容错）
     static var directoryURL: URL {

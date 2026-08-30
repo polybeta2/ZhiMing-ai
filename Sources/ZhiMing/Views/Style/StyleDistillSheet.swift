@@ -88,8 +88,8 @@ struct StyleDistillSheet: View {
             .onChange(of: pastedText) { _ in refreshSourceStats() }
             .onChange(of: importedText) { _ in refreshSourceStats() }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .utf8PlainText]) { result in
-            if case .success(let url) = result { loadFile(url) }
+        .zmDocumentPicker(isPresented: $showImporter, types: [.plainText, .utf8PlainText, .text]) { url in
+            loadFile(url)
         }
     }
 

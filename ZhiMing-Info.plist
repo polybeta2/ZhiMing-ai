@@ -26,5 +26,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- 暴露 Documents 给文件 App（我的 iPhone → 织命），用户可把 txt 放进 origins 文件夹 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
 </dict>
 </plist>

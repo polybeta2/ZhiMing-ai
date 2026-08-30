@@ -184,8 +184,8 @@ struct SourceProfileLibraryView: View {
                 }
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .utf8PlainText]) { result in
-            if case .success(let url) = result { loadFile(url) }
+        .zmDocumentPicker(isPresented: $showImporter, types: [.plainText, .utf8PlainText, .text]) { url in
+            loadFile(url)
         }
         .sheet(isPresented: $showOriginPicker) {
             originFolderSheet
@@ -429,7 +429,7 @@ struct SourceProfileLibraryView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("如何放入 txt", systemImage: "questionmark.circle")
                 .font(.subheadline.weight(.semibold))
-            Text("1. 打开系统「文件」App → 我的 iPhone → 织命 → origins 文件夹（LiveContainer：在它的文件面板中进入本 App 的沙盒目录）")
+            Text("1. 打开系统「文件」App → 浏览 → 我的 iPhone → 织命 → origins 文件夹（LiveContainer：在它的文件面板中进入本 App 的沙盒目录）")
             Text("2. 将小说 txt 复制/分享进该文件夹（UTF-8 或 GBK 编码均可）")
             Text("3. 回到本页，文件会出现在列表里，选中即可开始分析")
         }

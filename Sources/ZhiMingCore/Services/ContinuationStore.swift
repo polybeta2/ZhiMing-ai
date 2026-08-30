@@ -1,23 +1,31 @@
 import Foundation
 
 /// 续写原文边车：主库 JSON 是全量原子写，多 MB 原文不入库，
-/// 存 Documents/continuations/<profileID>.txt，滚动注入时按需懒加载。
+/// 存 Application Support/ZhiMing/continuations/<profileID>.txt，滚动注入时按需懒加载。
 public enum ContinuationStore {
 
-    /// 测试注入目录（nil = 默认 Documents/continuations）
+    /// 测试注入目录（nil = 默认 Application Support/ZhiMing/continuations）
     public static var overrideDirectory: URL?
 
     static var directoryURL: URL {
-        let dir: URL
         if let overrideDirectory {
-            dir = overrideDirectory
-        } else {
-            let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-                ?? FileManager.default.temporaryDirectory
-            dir = base.appendingPathComponent("continuations", isDirectory: true)
+            try? FileManager.default.createDirectory(at: overrideDirectory, withIntermediateDirectories: true)
+            return overrideDirectory
         }
-        // 默认与 override 目录都确保存在，避免覆盖路径写入失败
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        // 启用 UIFileSharingEnabled 后 Documents 会暴露给文件 App，多 MB 原文边车
+        // 迁往 Application Support（与 source_scan.sqlite 同级），Documents 只留 origins
+        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fm.temporaryDirectory
+        let dir = support.appendingPathComponent("ZhiMing/continuations", isDirectory: true)
+        // 一次性迁移：旧版（≤v2.12.2）曾放 Documents/continuations
+        let legacy = (fm.urls(for: .documentDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory)
+            .appendingPathComponent("continuations", isDirectory: true)
+        if fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: dir.path) {
+            try? fm.createDirectory(at: dir.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? fm.moveItem(at: legacy, to: dir)
+        }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
