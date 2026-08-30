@@ -127,6 +127,7 @@ final class AutoWriteViewModel: ObservableObject {
         var draft = ""
         do {
             let client = Self.client(for: provider)
+            let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
             for try await event in client.streamChat(messages: messages, config: config) {
                 if case .content(let delta) = event {
                     draft += delta
@@ -164,6 +165,7 @@ final class AutoWriteViewModel: ObservableObject {
         var raw = ""
         do {
             let client = Self.client(for: provider)
+            let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
             for try await event in client.streamChat(messages: messages, config: config) {
                 if case .content(let delta) = event {
                     raw += delta

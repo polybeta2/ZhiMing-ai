@@ -416,9 +416,7 @@ struct ChatView: View {
             }
             if novel.r18Enabled {
                 let r18 = PromptLibrary.shared.r18Supplement(forInput: text)
-                if let r18 {
-                    reviseSupplement = reviseSupplement.map { $0 + "\n\n" + r18 } ?? r18
-                }
+                reviseSupplement = reviseSupplement.map { $0 + "\n\n" + r18 } ?? r18
             }
             creation.revise(feedback: text, provider: provider, supplement: reviseSupplement)
         }
