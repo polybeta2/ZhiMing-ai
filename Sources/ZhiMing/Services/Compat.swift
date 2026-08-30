@@ -30,51 +30,28 @@ struct EmptyStateView: View {
     }
 }
 
-/// 自适应多行输入：iOS 16+ 用原生 TextField(axis: .vertical)，iOS 15 用 UITextView 自增高。
-/// - minHeight：空态/最小高度
-/// - maxLines：nil = 不封顶（随内容长高，交给外层页面滚动）；设值则封顶后内部滚动
-/// - textStyle：仅 iOS 15 的 UITextView 路径生效（iOS 16+ 字体由外部 .font 环境修饰符控制）
+/// 自适应多行输入：统一走 UITextView 自增高内核（iOS 15 / 16 / 26 行为一致，
+/// 规避 TextField(axis:.vertical) 在 iOS 26 空态占满整屏、fixedSize 后无法点击的问题）。
+/// - minHeight：空态最小高度；maxLines：封顶行数（超出内部滚动）
+/// - fixedHeight：固定高度模式（立项表单等容器敏感场景），内容超出时内部滚动
+/// - textStyle：文本样式（统一生效，不再依赖外部 .font 修饰）
 struct MultilineField: View {
     @Binding var text: String
     var placeholder: String = ""
     var minHeight: CGFloat = 66
     var maxLines: Int? = nil
+    var fixedHeight: CGFloat? = nil
     var textStyle: UIFont.TextStyle = .body
 
     var body: some View {
-        if #available(iOS 16.0, *) {
-            ios16Field
-                .frame(minHeight: minHeight, alignment: .topLeading)
-        } else {
-            ios15Field
-        }
-    }
-
-    @available(iOS 16.0, *)
-    @ViewBuilder
-    private var ios16Field: some View {
-        Group {
-            if let maxLines {
-                TextField(placeholder, text: $text, axis: .vertical)
-                    .lineLimit(1...maxLines)
-            } else {
-                TextField(placeholder, text: $text, axis: .vertical)
-            }
-        }
-        // iOS 26+ 上 axis:.vertical 处于灵活高度容器（聊天输入条/表单/卡片）时，空态会把高度
-        // 拉伸到父容器整个可用区域导致占满整屏；fixedSize(vertical) 强制高度由文本行数决定
-        // （空态 = 1 行，随输入增高，封顶后内部滚动），杜绝该问题。
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var ios15Field: some View {
         let uiFont = UIFont.preferredFont(forTextStyle: textStyle)
         return ZStack(alignment: .topLeading) {
             GrowingTextView(
                 text: $text,
                 textStyle: textStyle,
                 minHeight: minHeight,
-                maxLines: maxLines
+                maxLines: maxLines,
+                fixedHeight: fixedHeight
             )
             if text.isEmpty {
                 Text(placeholder)
@@ -86,12 +63,13 @@ struct MultilineField: View {
     }
 }
 
-/// iOS 15 的自增高 UITextView：内容多高框就多高，超过 maxLines 封顶并开启内部滚动
+/// UITextView 自增高内核：内容多高框就多高，超过 maxLines（或固定高度模式）封顶开启内部滚动
 private struct GrowingTextView: UIViewRepresentable {
     @Binding var text: String
     var textStyle: UIFont.TextStyle
     var minHeight: CGFloat
     var maxLines: Int?
+    var fixedHeight: CGFloat?
 
     func makeUIView(context: Context) -> GrowingUITextView {
         let tv = GrowingUITextView()
@@ -116,6 +94,7 @@ private struct GrowingTextView: UIViewRepresentable {
         if tv.font != font { tv.font = font }
         if tv.minHeight != minHeight { tv.minHeight = minHeight }
         if tv.maxLines != maxLines { tv.maxLines = maxLines }
+        if tv.fixedHeight != fixedHeight { tv.fixedHeight = fixedHeight }
         tv.invalidateIntrinsicContentSize()
     }
 
@@ -135,6 +114,7 @@ private struct GrowingTextView: UIViewRepresentable {
 private final class GrowingUITextView: UITextView {
     var minHeight: CGFloat = 0
     var maxLines: Int?
+    var fixedHeight: CGFloat?
 
     private var lastWidth: CGFloat = 0
 
@@ -149,6 +129,10 @@ private final class GrowingUITextView: UITextView {
     }
 
     override var intrinsicContentSize: CGSize {
+        if let fixed = fixedHeight {
+            // 固定高度模式：高度锁定，内容溢出靠内部滚动
+            return CGSize(width: UIView.noIntrinsicMetric, height: fixed)
+        }
         var height = max(contentHeight, minHeight)
         if let cap = capHeight, height > cap { height = cap }
         return CGSize(width: UIView.noIntrinsicMetric, height: height)
@@ -161,8 +145,13 @@ private final class GrowingUITextView: UITextView {
             lastWidth = bounds.width
             invalidateIntrinsicContentSize()
         }
-        // 封顶后允许内部滚动；未封顶保持不滚，让外层页面接管
-        let wantsScroll = (capHeight.map { contentHeight > $0 }) ?? false
+        // 固定高度或封顶后允许内部滚动；否则保持不滚，让外层页面接管
+        let wantsScroll: Bool
+        if fixedHeight != nil {
+            wantsScroll = true
+        } else {
+            wantsScroll = (capHeight.map { contentHeight > $0 }) ?? false
+        }
         if isScrollEnabled != wantsScroll {
             isScrollEnabled = wantsScroll
             invalidateIntrinsicContentSize()

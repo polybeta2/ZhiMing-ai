@@ -281,7 +281,7 @@ struct NovelCreateSheet: View {
         Form {
             Section("基本信息") {
                 TextField("书名", text: $title)
-                MultilineField(text: $synopsis, placeholder: "一句话梗概（可选）", minHeight: 56)
+                MultilineField(text: $synopsis, placeholder: "一句话梗概（可选）", fixedHeight: 100)
             }
             Section("叙事") {
                 Picker("叙事视角", selection: $perspective) {
@@ -289,7 +289,7 @@ struct NovelCreateSheet: View {
                         Text(option.isEmpty ? "未指定" : option).tag(option)
                     }
                 }
-                MultilineField(text: $styleGuide, placeholder: "风格约束（可选，续写时注入）", minHeight: 56)
+                MultilineField(text: $styleGuide, placeholder: "风格约束（可选，续写时注入）", fixedHeight: 80)
             }
             Section("强调色") {
                 HStack(spacing: AppTheme.spacing[2]) {
@@ -372,7 +372,7 @@ struct NovelCreateSheet: View {
             MultilineField(
                 text: $fullIdeaText,
                 placeholder: "在此粘贴完整思路：\n· 世界观与背景设定\n· 主要人物与关系\n· 核心冲突与主线走向\n· 关键情节节点（如男女主初遇、重大转折）\n· 结局方向…",
-                minHeight: 220
+                fixedHeight: 220
             )
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: AppTheme.radiusCard))
 

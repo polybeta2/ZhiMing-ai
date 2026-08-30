@@ -84,7 +84,6 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, AppTheme.spacing[3])
                     .padding(.vertical, AppTheme.spacing[1])
-                    .background(.bar)
                 }
                 ChatInputBar(
                     text: $input,
