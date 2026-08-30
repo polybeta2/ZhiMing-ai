@@ -40,6 +40,8 @@ private struct ScanProgressWrap: View {
 struct SourceProfileLibraryView: View {
     @EnvironmentObject private var store: AppStore
     @State private var showImporter = false
+    /// origins 文件夹导入
+    @State private var showOriginPicker = false
     /// 刚导入的文本 → 弹档位选择
     @State private var pendingScan: (text: String, title: String)?
     @State private var showModePicker = false
@@ -64,8 +66,17 @@ struct SourceProfileLibraryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showImporter = true
+                Menu {
+                    Button {
+                        showImporter = true
+                    } label: {
+                        Label("文件导入（系统文件）", systemImage: "doc.badge.plus")
+                    }
+                    Button {
+                        showOriginPicker = true
+                    } label: {
+                        Label("从 origins 文件夹导入", systemImage: "folder.fill.badge.plus")
+                    }
                 } label: {
                     Label("导入分析", systemImage: "doc.badge.plus")
                 }
@@ -73,6 +84,9 @@ struct SourceProfileLibraryView: View {
         }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .utf8PlainText]) { result in
             if case .success(let url) = result { loadFile(url) }
+        }
+        .sheet(isPresented: $showOriginPicker) {
+            originFolderSheet
         }
         .sheet(isPresented: $showModePicker) {
             modePickerSheet
@@ -106,11 +120,17 @@ struct SourceProfileLibraryView: View {
             EmptyStateView(title: "还没有原作档案", systemImage: "books.vertical",
                            description: "导入一本 txt 小说，提炼人物/事件/世界观，作为同人创作的防 OOC 地基")
             Button {
-                showImporter = true
+                showOriginPicker = true
             } label: {
-                Label("导入 txt 分析", systemImage: "doc.badge.plus")
+                Label("从 origins 文件夹导入", systemImage: "folder.fill.badge.plus")
             }
             .buttonStyle(.borderedProminent)
+            Button {
+                showImporter = true
+            } label: {
+                Label("文件导入（系统文件）", systemImage: "doc.badge.plus")
+            }
+            .buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -176,11 +196,84 @@ struct SourceProfileLibraryView: View {
         }
     }
 
+    // MARK: - origins 文件夹导入（LiveContainer 无法走系统文件保存路径，改为引导放入本地目录）
+
+    /// 列出目录 txt（进入 sheet 时刷新）
+    private var originFiles: [URL] { SourceOriginFolder.listTextFiles() }
+
+    private var originFolderSheet: some View {
+        CompatNavigationView {
+            Group {
+                if originFiles.isEmpty {
+                    VStack(spacing: 12) {
+                        EmptyStateView(title: "origins 文件夹是空的", systemImage: "folder",
+                                       description: "把要分析的小说 txt 放进这个文件夹，返回本页即可看到并导入")
+                        originHowTo
+                    }
+                    .padding()
+                } else {
+                    List {
+                        Section {
+                            ForEach(originFiles, id: \.path) { url in
+                                Button {
+                                    showOriginPicker = false
+                                    // 等 origins sheet 收起后再弹档位选择（避免 sheet 叠 sheet）
+                                    DispatchQueue.main.async { presentScan(url: url) }
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "doc.text")
+                                            .foregroundStyle(Color.accentColor)
+                                        Text(url.deletingPathExtension().lastPathComponent)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        Section {
+                            originHowTo
+                        }
+                    }
+                }
+            }
+            .navigationTitle("origins 文件夹")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showOriginPicker = false }
+                }
+            }
+        }
+    }
+
+    /// 引导文案：如何把 txt 放入 origins（文件 App / LiveContainer 文件面板）
+    private var originHowTo: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("如何放入 txt", systemImage: "questionmark.circle")
+                .font(.subheadline.weight(.semibold))
+            Text("1. 打开系统「文件」App → 我的 iPhone → 织命 → origins 文件夹（LiveContainer：在它的文件面板中进入本 App 的沙盒目录）")
+            Text("2. 将小说 txt 复制/分享进该文件夹（UTF-8 或 GBK 编码均可）")
+            Text("3. 回到本页，文件会出现在列表里，选中即可开始分析")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     // MARK: 文件导入（iOS 15：fileImporter + 安全作用域读取；常见站点 txt 多为 GBK 编码）
 
     private func loadFile(_ url: URL) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        presentScan(url: url)
+    }
+
+    /// 读文件 → 编码识别 → 弹档位选择（fileImporter 与 origins 共用）
+    private func presentScan(url: URL) {
         guard let data = try? Data(contentsOf: url) else {
             importError = "无法读取文件（读入失败），请确认文件可访问后重试"
             return
