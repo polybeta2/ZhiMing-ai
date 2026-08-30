@@ -45,16 +45,14 @@ struct BlueprintCardsView: View {
         VStack(spacing: AppTheme.spacing[1]) {
             TextField("书名", text: str(bp.title_suggestion))
                 .font(.headline)
-            TextField("主题与基调", text: str(bp.theme))
+            MultilineField(text: str(bp.theme), placeholder: "主题与基调", minHeight: 20, maxLines: 3, textStyle: .subheadline)
                 .font(.subheadline)
-            MultilineField(text: str(bp.synopsis), placeholder: "故事梗概", minHeight: 56)
+            MultilineField(text: str(bp.synopsis), placeholder: "故事梗概", minHeight: 56, textStyle: .subheadline)
                 .font(.subheadline)
-            HStack {
-                TextField("叙事视角", text: str(bp.perspective))
-                    .font(.footnote)
-                TextField("文风约束", text: str(bp.style_guide))
-                    .font(.footnote)
-            }
+            TextField("叙事视角", text: str(bp.perspective))
+                .font(.footnote)
+            MultilineField(text: str(bp.style_guide), placeholder: "文风约束", minHeight: 18, maxLines: 3, textStyle: .footnote)
+                .font(.footnote)
         }
         .textFieldStyle(.roundedBorder)
     }
@@ -77,9 +75,12 @@ struct BlueprintCardsView: View {
                             vm.blueprint?.characters.removeAll { $0.id == character.id }
                         }
                     }
-                    TextField("外貌", text: str($character.appearance)).font(.caption)
-                    TextField("性格", text: str($character.personality)).font(.caption)
-                    TextField("目标", text: str($character.goal)).font(.caption)
+                    MultilineField(text: str($character.appearance), placeholder: "外貌", minHeight: 16, maxLines: 4, textStyle: .caption1)
+                        .font(.caption)
+                    MultilineField(text: str($character.personality), placeholder: "性格", minHeight: 16, maxLines: 4, textStyle: .caption1)
+                        .font(.caption)
+                    MultilineField(text: str($character.goal), placeholder: "目标", minHeight: 16, maxLines: 4, textStyle: .caption1)
+                        .font(.caption)
                 }
                 .padding(AppTheme.spacing[1])
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
@@ -108,7 +109,7 @@ struct BlueprintCardsView: View {
                             vm.blueprint?.worldbuilding.removeAll { $0.id == entry.id }
                         }
                     }
-                    MultilineField(text: str($entry.content), placeholder: "设定内容", minHeight: 40)
+                    MultilineField(text: str($entry.content), placeholder: "设定内容", minHeight: 40, textStyle: .caption1)
                         .font(.caption)
                 }
                 .padding(AppTheme.spacing[1])
@@ -135,7 +136,7 @@ struct BlueprintCardsView: View {
                             vm.blueprint?.volumes.removeAll { $0.id == volume.id }
                         }
                     }
-                    MultilineField(text: str($volume.outline), placeholder: "卷纲", minHeight: 40)
+                    MultilineField(text: str($volume.outline), placeholder: "卷纲", minHeight: 40, textStyle: .caption1)
                         .font(.caption)
 
                     ForEach($volume.chapters) { $chapter in
@@ -143,7 +144,7 @@ struct BlueprintCardsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 TextField("章标题", text: str($chapter.title))
                                     .font(.caption.weight(.medium))
-                                MultilineField(text: str($chapter.detailed_outline), placeholder: "细纲", minHeight: 36)
+                                MultilineField(text: str($chapter.detailed_outline), placeholder: "细纲", minHeight: 36, textStyle: .caption2)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
