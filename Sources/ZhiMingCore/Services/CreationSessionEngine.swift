@@ -191,16 +191,39 @@ public struct CreationSessionEngine {
 
     // MARK: 蓝图写回（按名称/标题匹配，跳过无法定位的条目）
 
-    /// 把批次卷纲按卷名匹配写回蓝图对应卷
+    /// 去除空白与常见装饰符号（冒号/书名号/引号/标点），得到可比对的规范名。
+    /// 模型返回的卷名/标题常有「第一卷：雾起」「「死信」」式装饰差异，逐字相等会静默跳过。
+    static func stripNameDecoration(_ name: String) -> String {
+        let dropped: Set<Character> = [" ", "\t", "\n", "\r", "\u{3000}",
+                                       "：", ":", "·", "、", "，", ",", "。", ".", "-", "–", "—", "…",
+                                       "「", "」", "『", "』", "《", "》", "“", "”", "‘", "’",
+                                       "（", "）", "(", ")", "【", "】", "[", "]", "'", "\"", "!", "！", "?", "？"]
+        return String(name.lowercased().filter { !dropped.contains($0) })
+    }
+
+    /// 在候选名中定位 target：归一化精确匹配优先；退化为唯一包含匹配（有歧义不命中，宁缺勿错）。
+    static func fuzzyMatchIndex(names: [String], target: String) -> Int? {
+        let norm = stripNameDecoration(target)
+        guard !norm.isEmpty else { return nil }
+        let normNames = names.map { stripNameDecoration($0) }
+        if let idx = normNames.firstIndex(where: { $0 == norm }) { return idx }
+        let hits = normNames.indices.filter { idx in
+            let name = normNames[idx]
+            guard !name.isEmpty else { return false }
+            return name.contains(norm) || norm.contains(name)
+        }
+        return hits.count == 1 ? hits[0] : nil
+    }
+
+    /// 把批次卷纲按卷名匹配写回蓝图对应卷（宽容匹配：归一化 + 唯一包含回退）
     public mutating func applyVolumeBatch(_ batch: [VolumeOutlinePatch]) {
         guard var bp = state.blueprint else { return }
+        let names = bp.volumes.map { $0.name ?? "" }
         for item in batch {
             let name = item.name?.trimmingCharacters(in: .whitespaces) ?? ""
             let outline = item.outline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !name.isEmpty, !outline.isEmpty else { continue }
-            guard let vIndex = bp.volumes.firstIndex(where: {
-                ($0.name ?? "").trimmingCharacters(in: .whitespaces) == name
-            }) else { continue }
+            guard let vIndex = Self.fuzzyMatchIndex(names: names, target: name) else { continue }
             bp.volumes[vIndex].outline = item.outline
             if let arc = item.emotion_arc?.filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
                !arc.isEmpty { bp.volumes[vIndex].emotion_arc = arc }
@@ -214,31 +237,31 @@ public struct CreationSessionEngine {
         state.blueprint = bp
     }
 
-    /// 把批次细纲按标题匹配写回蓝图对应章节
+    /// 把批次细纲按标题匹配写回蓝图对应章节（宽容匹配：归一化 + 唯一包含回退，取首个命中）
     public mutating func applyBatch(_ batch: [BlueprintChapter]) {
         guard var bp = state.blueprint else { return }
+        var flat: [(v: Int, c: Int, title: String)] = []
+        for (v, volume) in bp.volumes.enumerated() {
+            for (c, chapter) in volume.chapters.enumerated() {
+                flat.append((v, c, chapter.title ?? ""))
+            }
+        }
         for item in batch {
             let title = item.title?.trimmingCharacters(in: .whitespaces) ?? ""
             let outline = item.detailed_outline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !title.isEmpty, !outline.isEmpty else { continue }
-            outer: for vIndex in bp.volumes.indices {
-                for cIndex in bp.volumes[vIndex].chapters.indices {
-                    let chapter = bp.volumes[vIndex].chapters[cIndex]
-                    if chapter.title?.trimmingCharacters(in: .whitespaces) == title {
-                        bp.volumes[vIndex].chapters[cIndex].detailed_outline = item.detailed_outline
-                        if let cards = item.scene_cards, !cards.isEmpty {
-                            bp.volumes[vIndex].chapters[cIndex].scene_cards = cards
-                        }
-                        // 伏笔登记：埋设章记录 title/detail/reveal_in，揭晓章批次生成时注入提醒
-                        let foreshadows = (item.foreshadowings ?? []).filter {
-                            !($0.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-                        }
-                        if !foreshadows.isEmpty {
-                            bp.volumes[vIndex].chapters[cIndex].foreshadowings = foreshadows
-                        }
-                        break outer
-                    }
-                }
+            guard let hit = Self.fuzzyMatchIndex(names: flat.map(\.title), target: title) else { continue }
+            let target = flat[hit]
+            bp.volumes[target.v].chapters[target.c].detailed_outline = item.detailed_outline
+            if let cards = item.scene_cards, !cards.isEmpty {
+                bp.volumes[target.v].chapters[target.c].scene_cards = cards
+            }
+            // 伏笔登记：埋设章记录 title/detail/reveal_in，揭晓章批次生成时注入提醒
+            let foreshadows = (item.foreshadowings ?? []).filter {
+                !($0.title ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            }
+            if !foreshadows.isEmpty {
+                bp.volumes[target.v].chapters[target.c].foreshadowings = foreshadows
             }
         }
         state.blueprint = bp
