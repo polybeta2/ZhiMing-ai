@@ -22,6 +22,8 @@ public final class Novel: Identifiable, ObservableObject, Codable {
     @Published public var r18Enabled: Bool = false
     /// 文风蒸馏：本书绑定的文风档案（nil = 未启用）；注入时与 styleGuide 并存，styleGuide 优先
     @Published public var activeStyleProfileID: UUID?
+    /// 同人立项：本书引用的原作档案（nil = 普通书）；写作时按时间窗注入原作人物/事件防 OOC
+    @Published public var sourceProfileID: UUID?
     @Published public var createdAt: Date
     @Published public var updatedAt: Date
 
@@ -49,7 +51,7 @@ public final class Novel: Identifiable, ObservableObject, Codable {
         case id, title, synopsis, genre, perspective, styleGuide
         case accentColorHex, enabledTagIDs, r18Enabled, createdAt, updatedAt
         case volumes, characters, worldEntries, chatThreads
-        case foreshadowings, lastStatsDate, lastTotalWordCount, activeStyleProfileID
+        case foreshadowings, lastStatsDate, lastTotalWordCount, activeStyleProfileID, sourceProfileID
     }
 
     public required init(from decoder: Decoder) throws {
@@ -73,6 +75,7 @@ public final class Novel: Identifiable, ObservableObject, Codable {
         lastStatsDate = try c.decodeIfPresent(Date.self, forKey: .lastStatsDate)
         lastTotalWordCount = try c.decodeIfPresent(Int.self, forKey: .lastTotalWordCount) ?? 0
         activeStyleProfileID = try c.decodeIfPresent(UUID.self, forKey: .activeStyleProfileID)
+        sourceProfileID = try c.decodeIfPresent(UUID.self, forKey: .sourceProfileID)
         for v in volumes {
             v.novel = self
             for ch in v.chapters {
@@ -107,6 +110,7 @@ public final class Novel: Identifiable, ObservableObject, Codable {
         try c.encodeIfPresent(lastStatsDate, forKey: .lastStatsDate)
         try c.encode(lastTotalWordCount, forKey: .lastTotalWordCount)
         try c.encodeIfPresent(activeStyleProfileID, forKey: .activeStyleProfileID)
+        try c.encodeIfPresent(sourceProfileID, forKey: .sourceProfileID)
     }
 }
 

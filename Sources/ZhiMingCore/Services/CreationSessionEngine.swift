@@ -334,7 +334,8 @@ public struct CreationSessionEngine {
 
     /// 卷纲批次上下文：创意/梗概/风格/角色 + 全书结构（卷名+各卷章节数）
     /// + 已生成卷纲（承接走向） + concept（结构提案的详细思路）
-    public func volumeBatchContext(targets: [String]) -> String {
+    /// + sourceWindow（同人：本批目标卷所在原作阶段的人物与事件，按需注入防 OOC）
+    public func volumeBatchContext(targets: [String], sourceWindow: String? = nil) -> String {
         guard let blueprint = state.blueprint else { return "" }
         var lines: [String] = []
         if let title = blueprint.title_suggestion, !title.isEmpty { lines.append("【书名】\(title)") }
@@ -349,6 +350,7 @@ public struct CreationSessionEngine {
                 return "\(name)（\(card.role ?? "角色")）"
             }
         if !characters.isEmpty { lines.append("【角色】\(characters.joined(separator: "、"))") }
+        appendSourceWindow(&lines, sourceWindow: sourceWindow)
 
         // 全书结构：卷名 + 各卷章节数 + 本卷章节标题（卷纲以此为剧情范围边界）
         let structure = blueprint.volumes.enumerated().map { index, volume -> String in
@@ -372,7 +374,8 @@ public struct CreationSessionEngine {
 
     /// 细纲批次的上下文：梗概/风格/角色 + 目标章节所在卷的卷纲 + 最近已生成细纲
     /// + 后续章节列表（衔接与伏笔揭晓定位）+ 需在本批揭晓的伏笔
-    public func batchContext(targets: [String]) -> String {
+    /// + sourceWindow（同人：目标章所在原作阶段的人物与事件，按需注入防 OOC）
+    public func batchContext(targets: [String], sourceWindow: String? = nil) -> String {
         guard let blueprint = state.blueprint else { return "" }
         var lines: [String] = []
         if let title = blueprint.title_suggestion, !title.isEmpty { lines.append("【书名】\(title)") }
@@ -387,6 +390,7 @@ public struct CreationSessionEngine {
                 return "\(name)（\(card.role ?? "角色")）"
             }
         if !characters.isEmpty { lines.append("【角色】\(characters.joined(separator: "、"))") }
+        appendSourceWindow(&lines, sourceWindow: sourceWindow)
 
         // 目标章节所在卷（按标题定位第一个命中的卷）+ 各卷卷纲摘要
         for (index, volume) in blueprint.volumes.enumerated() {
@@ -448,6 +452,13 @@ public struct CreationSessionEngine {
         }
         lines.append("【目标卷】\(volumeName)（本章数：\(count)）")
         return lines.joined(separator: "\n\n")
+    }
+
+    /// 同人注入：把原作时间窗文本追加为「【原作时间窗】」节（nil/空跳过）
+    private func appendSourceWindow(_ lines: inout [String], sourceWindow: String?) {
+        guard let window = sourceWindow?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !window.isEmpty else { return }
+        lines.append("【原作时间窗（本批目标阶段）】\n\(window)")
     }
 
     /// 已登记伏笔中 reveal_in 命中本批章节标题的条目（渲染为提示行）

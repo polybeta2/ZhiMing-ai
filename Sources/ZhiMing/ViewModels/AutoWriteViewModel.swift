@@ -117,7 +117,11 @@ final class AutoWriteViewModel: ObservableObject {
             base: provider.contextBudgetChars,
             injections: r18Text, styleCard, antiAIText, provider.systemPromptExtra)
         let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel,
-                                                          budgetChars: budget, styleCard: styleCard)
+                                                          budgetChars: budget, styleCard: styleCard,
+                                                          sourceWindow: SourceScanInjection.sourceWindow(
+                                                              novel: novel,
+                                                              profiles: store?.sourceProfiles ?? [],
+                                                              chapter: chapter))
         var messages = PromptTemplates.writing(context: context, wordTarget: wordTarget, extra: nil)
         if let r18 = r18Text { messages = PromptTemplates.applying(providerExtra: r18, to: messages) }
         if let antiAI = antiAIText { messages = PromptTemplates.applying(providerExtra: antiAI, to: messages) }
@@ -127,6 +131,7 @@ final class AutoWriteViewModel: ObservableObject {
         var draft = ""
         do {
             let client = Self.client(for: provider)
+            let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
             for try await event in client.streamChat(messages: messages, config: config) {
                 if case .content(let delta) = event {
                     draft += delta
@@ -164,6 +169,7 @@ final class AutoWriteViewModel: ObservableObject {
         var raw = ""
         do {
             let client = Self.client(for: provider)
+            let config = GenerationConfig(temperature: provider.temperature, maxTokens: provider.maxTokens)
             for try await event in client.streamChat(messages: messages, config: config) {
                 if case .content(let delta) = event {
                     raw += delta

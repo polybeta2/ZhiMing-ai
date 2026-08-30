@@ -21,13 +21,13 @@ struct StyleFusionSheet: View {
     private var base: StyleProfile? { profiles.first { $0.id == baseID } }
 
     private var fused: StyleProfile? {
-        guard let baseID, let base = base,
-              let voice = voiceID ?? baseID,
-              let syntax = syntaxID ?? baseID,
-              let diction = dictionID ?? baseID,
-              let rhythm = rhythmID ?? baseID,
-              let dialogue = dialogueID ?? baseID,
-              let emotion = emotionID ?? baseID else { return nil }
+        guard let baseID, let base = base else { return nil }
+        let voice = voiceID ?? baseID
+        let syntax = syntaxID ?? baseID
+        let diction = dictionID ?? baseID
+        let rhythm = rhythmID ?? baseID
+        let dialogue = dialogueID ?? baseID
+        let emotion = emotionID ?? baseID
         return StyleFusion.fuse(
             name: name.isEmpty ? "融合文风" : name,
             base: base,

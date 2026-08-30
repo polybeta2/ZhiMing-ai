@@ -19,7 +19,8 @@ final class WritingSessionViewModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
 
     func start(mode: Mode, chapter: Chapter, novel: Novel, provider: ProviderConfig,
-               instruction: String?, styleCard: String? = nil, antiAIInline: Bool = false) {
+               instruction: String?, styleCard: String? = nil, antiAIInline: Bool = false,
+               sourceWindow: String? = nil) {
         guard phase != .streaming else { return }
         draft = ""
         errorMessage = nil
@@ -62,7 +63,7 @@ final class WritingSessionViewModel: ObservableObject {
             let budget = PromptTemplates.adjustedInputBudget(
                 base: provider.contextBudgetChars,
                 injections: r18Text, styleCard, antiAIText, provider.systemPromptExtra)
-            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget, styleCard: styleCard)
+            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget, styleCard: styleCard, sourceWindow: sourceWindow)
             truncatedSections = context.truncatedSections
             baseMessages = PromptTemplates.writing(context: context, wordTarget: wordTarget, extra: instruction)
         case .continueWriting(let wordTarget):
@@ -70,7 +71,7 @@ final class WritingSessionViewModel: ObservableObject {
             let budget = PromptTemplates.adjustedInputBudget(
                 base: provider.contextBudgetChars,
                 injections: r18Text, styleCard, antiAIText, provider.systemPromptExtra)
-            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget, styleCard: styleCard)
+            let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel, budgetChars: budget, styleCard: styleCard, sourceWindow: sourceWindow)
             truncatedSections = context.truncatedSections
             baseMessages = PromptTemplates.continueWriting(context: context, wordTarget: wordTarget, extra: instruction)
             // 注：不得把上下文写入日志——正文/细纲/摘要均属用户隐私（验收用的 print 已移除）
