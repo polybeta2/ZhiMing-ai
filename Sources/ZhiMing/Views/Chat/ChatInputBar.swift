@@ -19,7 +19,9 @@ struct ChatInputBar: View {
             MultilineField(
                 text: $text,
                 placeholder: placeholder,
-                fixedLines: 2          // 固定 2 行高 + 内部滚动：iOS 26/LiveContainer 下自适应测量不可靠（空态曾撑满整屏）
+                minHeight: 22,
+                maxLines: 5,
+                minLines: 2          // 空态保底 2 行，随输入增高（封顶 5 行内滚）
             )
             .padding(.horizontal, AppTheme.spacing[3])
             .padding(.vertical, 9)

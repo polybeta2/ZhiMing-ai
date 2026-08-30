@@ -65,30 +65,25 @@ struct MultilineField: View {
         } else {
             targetHeight = max(measuredHeight, effectiveMin)
         }
-        return ZStack(alignment: .topLeading) {
-            GrowingTextView(
-                text: $text,
-                textStyle: textStyle,
-                capHeight: cap,
-                fixedHeight: effectiveFixed,
-                onMeasure: { h in
-                    if abs(h - measuredHeight) > 0.5 { measuredHeight = h }
-                }
-            )
-            .frame(height: targetHeight)   // ★ 高度在此锁死，桥接协商失效也无妨
-            if text.isEmpty {
-                Text(placeholder)
-                    .font(Font.system(size: uiFont.pointSize))
-                    .foregroundStyle(Color(uiColor: .placeholderText))
-                    .allowsHitTesting(false)
+        return GrowingTextView(
+            text: $text,
+            placeholder: placeholder,
+            textStyle: textStyle,
+            capHeight: cap,
+            fixedHeight: effectiveFixed,
+            onMeasure: { h in
+                if abs(h - measuredHeight) > 0.5 { measuredHeight = h }
             }
-        }
+        )
+        .frame(height: targetHeight)   // ★ 高度在此锁死，桥接协商失效也无妨
     }
 }
 
-/// UITextView 内核：测量内容高度回传 SwiftUI；封顶/固定模式下开启内部滚动
+/// UITextView 内核：测量内容高度回传 SwiftUI；封顶/固定模式下开启内部滚动。
+/// placeholder 为 UIKit 内置 label，直接跟随 UITextView 实际内容隐藏（不依赖 SwiftUI binding 同步）
 private struct GrowingTextView: UIViewRepresentable {
     @Binding var text: String
+    var placeholder: String = ""
     var textStyle: UIFont.TextStyle
     var capHeight: CGFloat?
     var fixedHeight: CGFloat?
@@ -103,11 +98,13 @@ private struct GrowingTextView: UIViewRepresentable {
         tv.isScrollEnabled = false
         tv.font = UIFont.preferredFont(forTextStyle: textStyle)
         tv.textColor = .label
+        tv.refreshPlaceholder(text: placeholder)
         return tv
     }
 
     func updateUIView(_ tv: GrowingUITextView, context: Context) {
         tv.onMeasure = onMeasure
+        tv.refreshPlaceholder(text: placeholder)
         // 拼音等 IME 组合期间（markedTextRange 非空）不用绑定反向覆盖，避免打断输入
         if tv.markedTextRange == nil, tv.text != text {
             let selection = tv.selectedTextRange
@@ -115,7 +112,10 @@ private struct GrowingTextView: UIViewRepresentable {
             if let selection { tv.selectedTextRange = selection }
         }
         let font = UIFont.preferredFont(forTextStyle: textStyle)
-        if tv.font != font { tv.font = font }
+        if tv.font != font {
+            tv.font = font
+            tv.syncPlaceholderFont(font)
+        }
         if tv.capHeight != capHeight { tv.capHeight = capHeight }
         if tv.fixedHeight != fixedHeight { tv.fixedHeight = fixedHeight }
         tv.measureAndReport()
@@ -129,6 +129,7 @@ private struct GrowingTextView: UIViewRepresentable {
 
         func textViewDidChange(_ tv: GrowingUITextView) {
             parent.text = tv.text
+            tv.refreshPlaceholder(text: tv.placeholderText)
             tv.measureAndReport()
         }
     }
@@ -141,6 +142,34 @@ private final class GrowingUITextView: UITextView {
 
     private var lastWidth: CGFloat = 0
 
+    private(set) var placeholderText: String = ""
+    private let placeholderLabel = UILabel()
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        placeholderLabel.font = UIFont.preferredFont(forTextStyle: .body)
+        placeholderLabel.textColor = .placeholderText
+        placeholderLabel.numberOfLines = 0
+        placeholderLabel.isUserInteractionEnabled = false
+        placeholderLabel.isHidden = true
+        addSubview(placeholderLabel)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// 更新 placeholder 文案并跟随实际内容显隐（不依赖 SwiftUI binding）
+    func refreshPlaceholder(text: String) {
+        placeholderText = text
+        placeholderLabel.text = text
+        placeholderLabel.isHidden = !self.text.isEmpty
+    }
+
+    /// 输入文本与 placeholder 用同一字体（动态字号变化时同步）
+    func syncPlaceholderFont(_ font: UIFont) {
+        placeholderLabel.font = font
+    }
+
     /// 实测内容高度并回传（宽度未就绪时不测，避免 sizeThatFits(width:0) 爆表）
     func measureAndReport() {
         guard bounds.width > 1 else { return }
@@ -150,6 +179,8 @@ private final class GrowingUITextView: UITextView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // placeholder label 与输入文本同起点（textContainerInset=0, lineFragmentPadding=0）
+        placeholderLabel.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
         // 宽度变化（旋转/布局/字体）后重新测量回传
         if bounds.width != lastWidth {
             lastWidth = bounds.width
