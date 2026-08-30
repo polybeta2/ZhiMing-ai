@@ -30,36 +30,52 @@ struct EmptyStateView: View {
     }
 }
 
-/// 自适应多行输入：统一走 UITextView 自增高内核（iOS 15 / 16 / 26 行为一致，
-/// 规避 TextField(axis:.vertical) 在 iOS 26 空态占满整屏、fixedSize 后无法点击的问题）。
-/// - minHeight：空态最小高度；maxLines：封顶行数（超出内部滚动）
-/// - fixedHeight：固定高度模式（立项表单等容器敏感场景），内容超出时内部滚动
-/// - textStyle：文本样式（统一生效，不再依赖外部 .font 修饰）
+/// 自适应多行输入：UITextView 内核 + 高度由 SwiftUI 层显式 frame 锁死。
+/// iOS 26/LiveContainer 上桥接层不查询 UITextView 的 intrinsicContentSize（UIScrollView
+/// 类视图会被直接拉伸到全部可用空间，即"占满整屏"根因），因此内容高度必须实测回传、
+/// 在 SwiftUI 侧用 .frame(height:) 确定，不参与任何桥接尺寸协商。
+/// - minHeight：最小高度；maxLines：封顶行数（超出内部滚动）
+/// - fixedHeight / fixedLines：固定高度模式（像素 / 按行随动态字体缩放）
+/// - minLines：最小高度按行折算
+/// - textStyle：文本样式（统一生效）
 struct MultilineField: View {
     @Binding var text: String
     var placeholder: String = ""
     var minHeight: CGFloat = 66
     var maxLines: Int? = nil
     var fixedHeight: CGFloat? = nil
-    /// 空态保底行数（如助手输入条空态 2 行），按实际字体行高换算
     var minLines: Int? = nil
-    /// 固定高度模式（按行）：如 fixedLines=2 表示固定 2 行高、内容超出内部滚动。
-    /// 对齐 fixedHeight，但随动态字体缩放；二者任一非空即进入固定高度模式
     var fixedLines: Int? = nil
     var textStyle: UIFont.TextStyle = .body
+
+    /// UITextView 实测的内容高度（宽度就绪后回传；首帧为 0 → 取最小高度）
+    @State private var measuredHeight: CGFloat = 0
 
     var body: some View {
         let uiFont = UIFont.preferredFont(forTextStyle: textStyle)
         let effectiveMin = minLines.map { max(minHeight, uiFont.lineHeight * CGFloat($0)) } ?? minHeight
         let effectiveFixed = fixedLines.map { uiFont.lineHeight * CGFloat($0) } ?? fixedHeight
+        let cap = maxLines.map { uiFont.lineHeight * CGFloat($0) }
+        // 最终高度：固定模式恒定；自适应模式 = clamp(实测, 最小, 封顶)
+        let targetHeight: CGFloat
+        if let fixed = effectiveFixed {
+            targetHeight = fixed
+        } else if let cap {
+            targetHeight = min(max(measuredHeight, effectiveMin), cap)
+        } else {
+            targetHeight = max(measuredHeight, effectiveMin)
+        }
         return ZStack(alignment: .topLeading) {
             GrowingTextView(
                 text: $text,
                 textStyle: textStyle,
-                minHeight: effectiveMin,
-                maxLines: maxLines,
-                fixedHeight: effectiveFixed
+                capHeight: cap,
+                fixedHeight: effectiveFixed,
+                onMeasure: { h in
+                    if abs(h - measuredHeight) > 0.5 { measuredHeight = h }
+                }
             )
+            .frame(height: targetHeight)   // ★ 高度在此锁死，桥接协商失效也无妨
             if text.isEmpty {
                 Text(placeholder)
                     .font(Font.system(size: uiFont.pointSize))
@@ -70,13 +86,13 @@ struct MultilineField: View {
     }
 }
 
-/// UITextView 自增高内核：内容多高框就多高，超过 maxLines（或固定高度模式）封顶开启内部滚动
+/// UITextView 内核：测量内容高度回传 SwiftUI；封顶/固定模式下开启内部滚动
 private struct GrowingTextView: UIViewRepresentable {
     @Binding var text: String
     var textStyle: UIFont.TextStyle
-    var minHeight: CGFloat
-    var maxLines: Int?
+    var capHeight: CGFloat?
     var fixedHeight: CGFloat?
+    var onMeasure: (CGFloat) -> Void
 
     func makeUIView(context: Context) -> GrowingUITextView {
         let tv = GrowingUITextView()
@@ -91,6 +107,7 @@ private struct GrowingTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ tv: GrowingUITextView, context: Context) {
+        tv.onMeasure = onMeasure
         // 拼音等 IME 组合期间（markedTextRange 非空）不用绑定反向覆盖，避免打断输入
         if tv.markedTextRange == nil, tv.text != text {
             let selection = tv.selectedTextRange
@@ -99,10 +116,9 @@ private struct GrowingTextView: UIViewRepresentable {
         }
         let font = UIFont.preferredFont(forTextStyle: textStyle)
         if tv.font != font { tv.font = font }
-        if tv.minHeight != minHeight { tv.minHeight = minHeight }
-        if tv.maxLines != maxLines { tv.maxLines = maxLines }
+        if tv.capHeight != capHeight { tv.capHeight = capHeight }
         if tv.fixedHeight != fixedHeight { tv.fixedHeight = fixedHeight }
-        tv.invalidateIntrinsicContentSize()
+        tv.measureAndReport()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -111,60 +127,45 @@ private struct GrowingTextView: UIViewRepresentable {
         var parent: GrowingTextView
         init(_ parent: GrowingTextView) { self.parent = parent }
 
-        func textViewDidChange(_ tv: UITextView) {
+        func textViewDidChange(_ tv: GrowingUITextView) {
             parent.text = tv.text
-            tv.invalidateIntrinsicContentSize()
+            tv.measureAndReport()
         }
     }
 }
 
 private final class GrowingUITextView: UITextView {
-    var minHeight: CGFloat = 0
-    var maxLines: Int?
+    var capHeight: CGFloat?
     var fixedHeight: CGFloat?
+    var onMeasure: ((CGFloat) -> Void)?
 
     private var lastWidth: CGFloat = 0
 
-    private var contentHeight: CGFloat {
-        // 布局首帧宽度尚未就绪时 sizeThatFits(width:0) 会把每个字折成一行算出爆表高度，
-        // 导致输入框首帧撑满整屏；宽度就绪前以最小高度兜底
-        guard bounds.width > 1 else { return minHeight }
-        return sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
-    }
-
-    private var capHeight: CGFloat? {
-        guard let maxLines else { return nil }
-        let lineHeight = font?.lineHeight ?? UIFont.preferredFont(forTextStyle: .body).lineHeight
-        return lineHeight * CGFloat(maxLines)
-    }
-
-    override var intrinsicContentSize: CGSize {
-        if let fixed = fixedHeight {
-            // 固定高度模式：高度锁定，内容溢出靠内部滚动
-            return CGSize(width: UIView.noIntrinsicMetric, height: fixed)
-        }
-        var height = max(contentHeight, minHeight)
-        if let cap = capHeight, height > cap { height = cap }
-        return CGSize(width: UIView.noIntrinsicMetric, height: height)
+    /// 实测内容高度并回传（宽度未就绪时不测，避免 sizeThatFits(width:0) 爆表）
+    func measureAndReport() {
+        guard bounds.width > 1 else { return }
+        let h = sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
+        onMeasure?(h)
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // 宽度变化（旋转/布局）后内容测量失效，重新触发尺寸协商
+        // 宽度变化（旋转/布局/字体）后重新测量回传
         if bounds.width != lastWidth {
             lastWidth = bounds.width
-            invalidateIntrinsicContentSize()
+            measureAndReport()
         }
-        // 固定高度或封顶后允许内部滚动；否则保持不滚，让外层页面接管
+        // 固定高度或内容超封顶 → 内部滚动；否则交给外层（frame 已锁死高度，此处仅控制滚动开关）
         let wantsScroll: Bool
         if fixedHeight != nil {
             wantsScroll = true
+        } else if let cap = capHeight {
+            wantsScroll = sizeThatFits(CGSize(width: max(bounds.width, 1), height: .greatestFiniteMagnitude)).height > cap
         } else {
-            wantsScroll = (capHeight.map { contentHeight > $0 }) ?? false
+            wantsScroll = false
         }
         if isScrollEnabled != wantsScroll {
             isScrollEnabled = wantsScroll
-            invalidateIntrinsicContentSize()
         }
     }
 }
