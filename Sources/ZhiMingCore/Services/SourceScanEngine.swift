@@ -33,7 +33,7 @@ public struct SourceScanEngine {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    // ---- Map 阶段：逐块微摘要（跳过 done） ----
+                    // ---- Map 阶段：逐块微摘要（跳过 done；网络/解析失败各重试 3 次） ----
                     continuation.yield(.phase(.mapping))
                     var micros: [SourceMicroSummarizer.MicroSummary] = []
                     var tokensIn = 0, tokensOut = 0
@@ -41,22 +41,23 @@ public struct SourceScanEngine {
                         try Task.checkCancellation()
                         self.onChunkRequest(pos, self.chunks.count)
                         let msgs = SourceMicroSummarizer.messages(chunk: chunk.text, chapterMarker: nil)
-                        let (reply, drained) = await Self.request(client: self.client, messages: msgs, config: Self.config)
-                        tokensIn += msgs.totalContentChars / 2
-                        tokensOut += reply.count / 2
-                        let micro: SourceMicroSummarizer.MicroSummary
-                        if let parsed = try? SourceMicroSummarizer.parse(reply) {
-                            micro = parsed
-                        } else if drained {
-                            // 宽松重试一次 → 仍败降级空摘要（不阻塞）
-                            let retry = await Self.request(client: self.client, messages: msgs, config: Self.config)
-                            if let parsed = try? SourceMicroSummarizer.parse(retry.reply) {
+                        var micro = SourceMicroSummarizer.MicroSummary()
+                        var networkFailed = true
+                        for _ in 0..<3 {
+                            let (reply, drained) = await Self.request(client: self.client, messages: msgs, config: Self.config)
+                            networkFailed = !drained
+                            if let parsed = try? SourceMicroSummarizer.parse(reply) {
                                 micro = parsed
-                            } else {
-                                micro = SourceMicroSummarizer.MicroSummary()
+                                networkFailed = false
+                                break
                             }
-                        } else {
-                            micro = SourceMicroSummarizer.MicroSummary()
+                            // 解析失败或网络错误 → 继续重试
+                        }
+                        tokensIn += msgs.totalContentChars / 2
+                        tokensOut += Self.microChars(micro)
+                        if networkFailed {
+                            continuation.finish(throwing: LLMError.httpStatus(504, "同人分析网络重试 3 次均失败"))
+                            return
                         }
                         continuation.yield(.chunkDone(pos))
                         continuation.yield(.chunkProgress(done: pos + 1, total: self.chunks.count))
@@ -65,7 +66,7 @@ public struct SourceScanEngine {
                     }
                     guard !Task.isCancelled else { throw CancellationError() }
 
-                    // ---- Reduce 一段：按批 40 条归并为阶段摘要 ----
+                    // ---- Reduce 一段：按批 40 条归并为阶段摘要（网络失败重试 3 次） ----
                     continuation.yield(.phase(.reducing))
                     let batchSize = 40
                     var stageSummaries: [String] = []
@@ -74,15 +75,23 @@ public struct SourceScanEngine {
                         let slice = Array(micros[batchStart..<min(batchStart + batchSize, micros.count)])
                         let prompt = SourceReducer.batchPrompt(micros: slice, batchChars: 12000)
                         let msgs = [LLMMessage(role: .user, content: prompt)]
-                        let (reply, _) = await Self.request(client: self.client, messages: msgs, config: Self.reduceConfig)
+                        let (reply, drained) = await Self.retryingRequest(client: self.client, messages: msgs, config: Self.reduceConfig)
+                        guard drained else {
+                            continuation.finish(throwing: LLMError.httpStatus(504, "同人分析网络重试 3 次均失败"))
+                            return
+                        }
                         stageSummaries.append(reply)
                         continuation.yield(.reduceText(reply))
                     }
 
-                    // ---- Reduce 二段：终归并为档案 ----
+                    // ---- Reduce 二段：终归并为档案（网络失败重试 3 次） ----
                     // 冒烟教训：终归并输出可达 5000+ token，按 Map 的 3000 上限会截断 JSON 导致解析失败
                     let finalMSGS = SourceReducer.finalPrompt(stageSummaries: stageSummaries, characters: [])
-                    let (finalRaw, _) = await Self.request(client: self.client, messages: finalMSGS, config: Self.finalConfig)
+                    let (finalRaw, drained) = await Self.retryingRequest(client: self.client, messages: finalMSGS, config: Self.finalConfig)
+                    guard drained else {
+                        continuation.finish(throwing: LLMError.httpStatus(504, "同人分析网络重试 3 次均失败"))
+                        return
+                    }
                     let profile = try SourceReducer.parseFinal(finalRaw, fallbackTitle: "同人原作")
                     continuation.yield(.phase(.done))
                     continuation.yield(.completed(profile))
@@ -106,6 +115,21 @@ public struct SourceScanEngine {
         } catch {
             return (reply, false)
         }
+    }
+
+    /// 网络重试：最多 3 次，读到流尾即返回
+    private static func retryingRequest(client: LLMClient, messages: [LLMMessage],
+                                        config: GenerationConfig) async -> (reply: String, drained: Bool) {
+        for _ in 0..<3 {
+            let (reply, drained) = await request(client: client, messages: messages, config: config)
+            if drained { return (reply, true) }
+        }
+        return ("", false)
+    }
+
+    /// 微摘要 token 近似（输出字符数 / 2）
+    private static func microChars(_ micro: SourceMicroSummarizer.MicroSummary) -> Int {
+        ((try? String(data: JSONEncoder().encode(micro), encoding: .utf8))?.count ?? 0) / 2
     }
 
     /// Map 阶段：微摘要短小，3000 足够

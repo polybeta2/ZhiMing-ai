@@ -28,7 +28,8 @@ final class SourceScanViewModel: ObservableObject {
     private var task: Task<Void, Never>?
     private var client: OpenAICompatibleClient?
     private var config: GenerationConfig?
-    private let provider: ProviderConfig
+    /// 当前服务商（可在暂停/失败后由进度页切换，下次 start 生效）
+    private(set) var provider: ProviderConfig
     private let store: AppStore
     private var sourceText = ""
     private var sourceTitle = ""
@@ -38,6 +39,15 @@ final class SourceScanViewModel: ObservableObject {
     init(provider: ProviderConfig, store: AppStore) {
         self.provider = provider
         self.store = store
+    }
+
+    /// 可切换的服务商列表（进度页换 provider 用）
+    var availableProviders: [ProviderConfig] { store.providers }
+
+    /// 更换服务商：仅未开始/已暂停/失败时可生效（下次 start/resume 使用新配置）
+    func setProvider(_ newProvider: ProviderConfig) {
+        guard phase == .idle || phase == .paused || isFailed else { return }
+        provider = newProvider
     }
 
     var isFailed: Bool { if case .failed = phase { return true }; return false }
@@ -126,7 +136,55 @@ final class SourceScanViewModel: ObservableObject {
 
     // MARK: - 主循环（Map → 一段归并 → 二段终归并）
 
-    /// Map 阶段：微摘要短小，3000 足够；一段归并放宽到 6000；终归并整本档案取 8000（冒烟实测 3000 会截断 JSON）
+    /// 单次流式拉取：聚合正文；返回 (正文, 是否完整读到流尾)。
+    /// 网络错误（504/openai_error 等）由调用方循环重试。
+    private func fetch(_ msgs: [LLMMessage], client: OpenAICompatibleClient,
+                       config: GenerationConfig) async -> (reply: String, drained: Bool) {
+        var reply = ""
+        do {
+            for try await event in client.streamChat(messages: msgs, config: config) {
+                progress.handle(event)
+                if case .content(let delta) = event { reply += delta }
+                if Task.isCancelled { break }
+            }
+            return (reply, true)
+        } catch {
+            return (reply, false)
+        }
+    }
+
+    /// 解析 + 网络双重重试：最多 attempts 次（默认 3）。
+    /// 返回 nil 表示网络全程失败（调用方暂停）；空摘要表示解析全程失败（降级不阻塞）
+    private func fetchParsed(_ msgs: [LLMMessage], client: OpenAICompatibleClient,
+                             config: GenerationConfig, attempts: Int = 3) async -> SourceMicroSummarizer.MicroSummary? {
+        for _ in 0..<attempts {
+            if Task.isCancelled { return nil }
+            let (reply, drained) = await fetch(msgs, client: client, config: config)
+            guard drained else { continue }                     // 网络错误 → 重试
+            if let parsed = try? SourceMicroSummarizer.parse(reply) {
+                return parsed
+            }
+            // 解析失败 → 重试
+        }
+        return nil
+    }
+
+    /// 网络重试（降级/归并用）：最多 attempts 次，全部读完即停止
+    private func fetchWithRetry(_ msgs: [LLMMessage], client: OpenAICompatibleClient,
+                                config: GenerationConfig, attempts: Int = 3) async -> (reply: String, drained: Bool) {
+        for _ in 0..<attempts {
+            if Task.isCancelled { return ("", false) }
+            let (reply, drained) = await fetch(msgs, client: client, config: config)
+            if drained { return (reply, true) }
+        }
+        return ("", false)
+    }
+
+    /// 微摘要 token 近似（输出字符数 / 2）
+    private func microChars(_ micro: SourceMicroSummarizer.MicroSummary) -> Int {
+        ((try? String(data: JSONEncoder().encode(micro), encoding: .utf8))?.count ?? 0) / 2
+    }
+
     private func runLoop(chunks: [SourceScanChunker.Chunk], client: OpenAICompatibleClient,
                          done: Set<Int>, pid: UUID, priorIn: Int, priorOut: Int,
                          mapConfig: GenerationConfig, reduceConfig: GenerationConfig,
@@ -135,51 +193,20 @@ final class SourceScanViewModel: ObservableObject {
         var inTotal = priorIn
         var outTotal = priorOut
 
-        // ---- Map：逐块（跳过 done） ----
+        // ---- Map：逐块（跳过 done），网络/解析失败各重试 3 次 ----
         for (pos, chunk) in chunks.enumerated() where !done.contains(pos) {
             if Task.isCancelled { break }
             let msgs = SourceMicroSummarizer.messages(chunk: chunk.text, chapterMarker: nil)
-            var reply = ""
-            do {
-                for try await event in client.streamChat(messages: msgs, config: mapConfig) {
-                    progress.handle(event)
-                    if case .content(let delta) = event { reply += delta }
-                    if Task.isCancelled { break }
-                }
-            } catch {
-                // 网络中断：当前块留在 pending，暂停供用户继续
-                await MainActor.run { [weak self] in
-                    self?.cancel()
-                }
+            let result = await fetchParsed(msgs, client: client, config: mapConfig)
+            if result == nil {
+                // 网络 3 次全败：当前块留在 pending，暂停供换服务商/续跑
+                await MainActor.run { [weak self] in self?.cancel() }
                 return
             }
             if Task.isCancelled { break }
             inTotal += msgs.totalContentChars / 2
-            outTotal += reply.count / 2
-
-            var micro: SourceMicroSummarizer.MicroSummary
-            if let parsed = try? SourceMicroSummarizer.parse(reply) {
-                micro = parsed
-            } else {
-                // 宽松重试一次 → 仍败降级空摘要（不阻塞）
-                let retry = try? await withThrowingTaskGroup(of: String.self) { group in
-                    group.addTask {
-                        var r = ""
-                        for try await event in client.streamChat(messages: msgs, config: mapConfig) {
-                            if case .content(let delta) = event { r += delta }
-                        }
-                        return r
-                    }
-                    guard let first = try await group.next() else { return "" }
-                    group.cancelAll()
-                    return first
-                }
-                if let retry, let parsed = try? SourceMicroSummarizer.parse(retry) {
-                    micro = parsed
-                } else {
-                    micro = SourceMicroSummarizer.MicroSummary()
-                }
-            }
+            let micro = result ?? SourceMicroSummarizer.MicroSummary()   // 解析全败 → 降级空摘要
+            outTotal += microChars(micro)
             SourceScanCache.mark(profile: pid, idx: pos, status: "done",
                                  payload: microPayload(micro),
                                  tokensIn: inTotal, tokensOut: outTotal)
@@ -197,7 +224,7 @@ final class SourceScanViewModel: ObservableObject {
             return
         }
 
-        // ---- Reduce 一段：按批 40 条归并为阶段摘要 ----
+        // ---- Reduce 一段：按批 40 条归并为阶段摘要（网络失败重试 3 次） ----
         await MainActor.run { [weak self] in self?.phase = .reducing }
         let batchSize = 40
         var stageSummaries: [String] = SourceScanCache.loadReduceStrings(profile: pid)
@@ -206,14 +233,8 @@ final class SourceScanViewModel: ObservableObject {
             let slice = Array(micros[batchStart..<min(batchStart + batchSize, micros.count)])
             let prompt = SourceReducer.batchPrompt(micros: slice, batchChars: 12000)
             let msgs = [LLMMessage(role: .user, content: prompt)]
-            var reply = ""
-            do {
-                for try await event in client.streamChat(messages: msgs, config: reduceConfig) {
-                    progress.handle(event)
-                    if case .content(let delta) = event { reply += delta }
-                    if Task.isCancelled { break }
-                }
-            } catch {
+            let (reply, drained) = await fetchWithRetry(msgs, client: client, config: reduceConfig)
+            guard drained else {
                 await MainActor.run { [weak self] in self?.cancel() }
                 return
             }
@@ -230,16 +251,10 @@ final class SourceScanViewModel: ObservableObject {
         }
         outTotal += stageSummaries.reduce(0) { $0 + $1.count } / 2
 
-        // ---- Reduce 二段：终归并为档案 ----
+        // ---- Reduce 二段：终归并为档案（网络失败重试 3 次） ----
         let finalMSGS = SourceReducer.finalPrompt(stageSummaries: stageSummaries, characters: [])
-        var finalRaw = ""
-        do {
-            for try await event in client.streamChat(messages: finalMSGS, config: finalConfig) {
-                progress.handle(event)
-                if case .content(let delta) = event { finalRaw += delta }
-                if Task.isCancelled { break }
-            }
-        } catch {
+        let (finalRaw, drained) = await fetchWithRetry(finalMSGS, client: client, config: finalConfig)
+        guard drained else {
             await MainActor.run { [weak self] in self?.cancel() }
             return
         }

@@ -13,6 +13,13 @@ private struct ScanJob: Identifiable {
     let provider: ProviderConfig
 }
 
+/// 待分析文件信息（档位选择页展示章数/字数用）
+private struct PendingFile {
+    let text: String
+    let title: String
+    let chapterCount: Int
+}
+
 /// 扫描进度承载视图：负责持有 VM 生命周期
 private struct ScanProgressWrap: View {
     let job: ScanJob
@@ -42,8 +49,6 @@ struct SourceProfileLibraryView: View {
     @State private var showImporter = false
     /// origins 文件夹导入
     @State private var showOriginPicker = false
-    /// 刚导入的文本 → 弹档位选择
-    @State private var pendingScan: (text: String, title: String)?
     @State private var showModePicker = false
     /// 确认档位后 → 启动扫描 sheet
     @State private var activeJob: ScanJob?
@@ -156,6 +161,9 @@ struct SourceProfileLibraryView: View {
 
     @State private var chosenMode: ScanMode = .fast
 
+    /// 待分析文件（含切章统计）
+    @State private var pendingScan: PendingFile?
+
     private var modePickerSheet: some View {
         CompatNavigationView {
             Form {
@@ -170,8 +178,15 @@ struct SourceProfileLibraryView: View {
                     Section("文件") {
                         Text(pending.title)
                             .font(.subheadline)
-                        Text("\(pending.text.count) 字")
-                            .font(.footnote)
+                        HStack(spacing: 6) {
+                            Image(systemName: "text.book.closed")
+                                .foregroundStyle(Color.accentColor)
+                            Text("已识别 \(pending.chapterCount) 章 · \(pending.text.count) 字")
+                                .font(.footnote.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        Label("切章完成：全书按章节标记拆分，可直接开始分析。", systemImage: "checkmark.seal.fill")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -272,7 +287,7 @@ struct SourceProfileLibraryView: View {
         presentScan(url: url)
     }
 
-    /// 读文件 → 编码识别 → 弹档位选择（fileImporter 与 origins 共用）
+    /// 读文件 → 编码识别 → 切章统计 → 弹档位选择（fileImporter 与 origins 共用）
     private func presentScan(url: URL) {
         guard let data = try? Data(contentsOf: url) else {
             importError = "无法读取文件（读入失败），请确认文件可访问后重试"
@@ -285,9 +300,17 @@ struct SourceProfileLibraryView: View {
         // 去除头部 BOM（常见于 Windows 导出的 txt）
         let body = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
         let title = url.deletingPathExtension().lastPathComponent
-        pendingScan = (body, title)
-        chosenMode = .fast
-        showModePicker = true
+        // 导入即切章：让用户在档位选择页看到这本小说识别出多少章（切章是 CPU 密集操作，放后台）
+        Task {
+            let chapterCount = await Task.detached(priority: .userInitiated) {
+                StyleChapterSampler.split(body).count
+            }.value
+            await MainActor.run {
+                pendingScan = PendingFile(text: body, title: title, chapterCount: chapterCount)
+                chosenMode = .fast
+                showModePicker = true
+            }
+        }
     }
 
     /// 编码探测：UTF-8 优先（含 BOM/容错），失败回退 GB18030（覆盖 GBK 全字符集）

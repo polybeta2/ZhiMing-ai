@@ -30,6 +30,10 @@ let package = Package(
         .target(
             name: "ZhiMing",
             dependencies: ["ZhiMingCore"],
+            resources: [
+                // 分析进度页的祈祷 GIF
+                .copy("Resources/praying.gif"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ],

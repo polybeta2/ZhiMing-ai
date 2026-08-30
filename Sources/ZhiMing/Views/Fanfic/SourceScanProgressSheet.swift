@@ -2,10 +2,13 @@
 import SwiftUI
 import ZhiMingCore
 
-/// 同人原作分析进度：阶段标签 + 块进度 + token 计量 + 流式状态 + 暂停/继续。
+/// 同人原作分析进度：GIF 祈愿 + 阶段标签 + 块进度 + token 计量 + 流式状态 + 暂停/继续 + 服务商切换。
 struct SourceScanProgressSheet: View {
     @ObservedObject var vm: SourceScanViewModel
     var onFinish: (SourceNovelProfile?) -> Void
+
+    /// 服务商选择（进行中禁用；@State 与 vm.provider 同步展示）
+    @State private var providerID: UUID?
 
     private var currentStage: String {
         switch vm.phase {
@@ -19,13 +22,19 @@ struct SourceScanProgressSheet: View {
 
     private let stageNames = ["解析", "提取", "归并", "完成"]
 
+    private var isWorking: Bool { vm.phase == .splitting || vm.phase == .mapping || vm.phase == .reducing }
+
     var body: some View {
         CompatNavigationView {
-            VStack(alignment: .leading, spacing: AppTheme.spacing[3]) {
+            VStack(alignment: .leading, spacing: AppTheme.spacing[2]) {
+                prayingHeader
                 stageCapsules
                 StreamingStatusView(tracker: vm.progress)
                 blockProgress
                 tokenMeter
+                if vm.phase == .paused || vm.isFailed {
+                    providerPicker
+                }
                 if case .failed(let message) = vm.phase {
                     Label(message, systemImage: "xmark.octagon.fill")
                         .font(.caption)
@@ -40,6 +49,47 @@ struct SourceScanProgressSheet: View {
             .padding(AppTheme.spacing[3])
             .navigationTitle("分析进度")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if providerID == nil { providerID = vm.provider.id }
+            }
+        }
+    }
+
+    /// 祈愿头图：本地 GIF（少女祈祷中）+ 文案，扫描期间展示
+    private var prayingHeader: some View {
+        VStack(spacing: AppTheme.spacing[1]) {
+            AnimatedGIFView(resourceName: "praying")
+                .frame(width: 110, height: 110)
+            Text(isWorking ? "少女祈祷中..." : "少女静静等着…")
+                .font(.system(.footnote, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, AppTheme.spacing[0])
+    }
+
+    /// 服务商切换（暂停/失败后可换，已保存的服务商列表）
+    private var providerPicker: some View {
+        let providers = vm.availableProviders
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("API 服务商")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("API 服务商", selection: Binding(
+                get: { providerID ?? vm.provider.id },
+                set: { newID in
+                    providerID = newID
+                    if let p = providers.first(where: { $0.id == newID }) {
+                        vm.setProvider(p)
+                    }
+                }
+            )) {
+                ForEach(providers) { p in
+                    Text(p.name).tag(p.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(providers.isEmpty || isWorking)
         }
     }
 
