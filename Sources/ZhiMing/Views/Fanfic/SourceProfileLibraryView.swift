@@ -126,7 +126,13 @@ struct SourceProfileLibraryView: View {
     /// 从书签恢复：读回源文本 + 重建 Provider（优先库里已有的；否则按快照重建还原 Keychain 键）
     private func resumeTask(_ bm: ScanTaskBookmark) {
         guard let text = ScanTaskBookmark.loadText(profileID: bm.pid),
-              let mode = ScanMode(rawValue: bm.modeRaw) else { return }
+              let mode = ScanMode(rawValue: bm.modeRaw) else {
+            // 源文本意外丢失（边车文件损坏/被清）→ 给反馈并清理孤儿书签，避免横幅静默残留
+            importError = "该任务的分析缓存已失效（源文本丢失），已移除恢复入口，请重新导入分析。"
+            ScanTaskBookmark.delete(profileID: bm.pid)
+            SourceScanCache.clear(profile: bm.pid)
+            return
+        }
         let provider = store.providers.first(where: { $0.apiKeyID == bm.providerKeyID })
             ?? rebuildProvider(bm)
         activeJob = ScanJob(text: text, title: bm.title, mode: mode, batchSize: bm.batchSize,

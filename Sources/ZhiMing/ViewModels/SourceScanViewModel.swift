@@ -113,6 +113,7 @@ final class SourceScanViewModel: ObservableObject {
 
         guard let apiKey = KeychainHelper.load(account: provider.apiKeyID),
               let baseUrl = URL(string: provider.baseUrl) else {
+            endBackgroundTask()   // 早退：释放后台保活（书签保留，修好配置后可续）
             phase = .failed("未配置有效的模型接口或 API Key")
             return
         }
