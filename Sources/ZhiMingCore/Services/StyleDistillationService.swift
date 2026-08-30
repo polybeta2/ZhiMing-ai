@@ -258,13 +258,17 @@ public final class StyleDistillationService {
     // MARK: S4 查重与修正
 
     private func checkAndFix(profile: StyleProfile, sourceText: String, fixSystem: String) async throws {
+        // 原文索引只建一次：候选（示范/证据/修正响应）全部复用，
+        // 大样本下逐候选重建是秒级卡顿 + 内存峰值（见 StylePerfTests）
+        let index = StyleMetrics.ngramIndex(of: sourceText)
+
         func violatedExamples() -> [(index: Int, example: StyleExample)] {
             profile.examples.enumerated()
-                .filter { StyleMetrics.hasViolation($0.element.styled, against: sourceText) }
+                .filter { index.hasViolation($0.element.styled) }
                 .map { (index: $0.offset, example: $0.element) }
         }
         // 证据片段违规直接剔除（修正成本高于收益），不作 LLM 回炉
-        profile.evidence.removeAll { StyleMetrics.hasViolation($0.snippet, against: sourceText) }
+        profile.evidence.removeAll { index.hasViolation($0.snippet) }
 
         let violations = violatedExamples()
         guard !violations.isEmpty else { return }
@@ -274,7 +278,7 @@ public final class StyleDistillationService {
         let raw = try await complete(messages(fixSystem, "【违规示范】\n\(list)"))
         if let items = LLMJSONParser.decode([StyleFixItem].self, fromJSONObjectIn: raw) {
             for item in items where item.index >= 0 && item.index < profile.examples.count {
-                if !StyleMetrics.hasViolation(item.styled, against: sourceText) {
+                if !index.hasViolation(item.styled) {
                     profile.examples[item.index].styled = item.styled
                     if let principle = item.principle?.trimmingCharacters(in: .whitespacesAndNewlines), !principle.isEmpty {
                         profile.examples[item.index].principle = principle
@@ -284,8 +288,8 @@ public final class StyleDistillationService {
         }
         // 仍违规的示范直接丢弃；确有丢弃才降置信度
         let stillViolated = violatedExamples()
-        for (index, _) in stillViolated.reversed() {
-            profile.examples.remove(at: index)
+        for (pos, _) in stillViolated.reversed() {
+            profile.examples.remove(at: pos)
         }
         if !stillViolated.isEmpty { profile.confidence = "low" }
     }

@@ -28,25 +28,19 @@ struct StyleDistillSheet: View {
     @State private var saved = false
     /// 上次未完成的蒸馏（S2 已缓存），可从风格卡阶段恢复
     @State private var cachedResume: StyleDistillCache.Payload?
-
-    private var bookText: String {
-        guard let id = selectedBookID,
-              let novel = store.novels.first(where: { $0.id == id }) else { return "" }
-        return novel.sortedVolumes
-            .flatMap { $0.sortedChapters.map(\.content) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
-    }
+    // 大样本（整本书可达百万字级）的拼接与统计按需缓存，禁止在 body 每帧重算
+    @State private var bookTextCache = ""
+    @State private var sourceCount = 0
 
     private var sourceText: String {
         switch kind {
         case .paste: return pastedText
         case .file: return importedText
-        case .book: return bookText
+        case .book: return bookTextCache
         }
     }
 
-    private var charCount: Int { sourceText.trimmingCharacters(in: .whitespacesAndNewlines).count }
+    private var charCount: Int { sourceCount }
     private var canStart: Bool { charCount >= 1_000 && !vm.isFailed && vm.phase != .done }
 
     var body: some View {
@@ -87,11 +81,34 @@ struct StyleDistillSheet: View {
             }
             .onAppear {
                 if cachedResume == nil { cachedResume = StyleDistillCache.load() }
+                refreshSourceStats()
             }
+            .onChange(of: kind) { _ in refreshSourceStats() }
+            .onChange(of: selectedBookID) { _ in refreshSourceStats() }
+            .onChange(of: pastedText) { _ in refreshSourceStats() }
+            .onChange(of: importedText) { _ in refreshSourceStats() }
         }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .utf8PlainText]) { result in
             if case .success(let url) = result { loadFile(url) }
         }
+    }
+
+    // MARK: 样本统计（按需刷新，不在 body 每帧重算）
+
+    private func refreshSourceStats() {
+        if kind == .book {
+            // 拼接全书正文只在此处发生（切换书目时一次），不随渲染重复
+            if let id = selectedBookID,
+               let novel = store.novels.first(where: { $0.id == id }) {
+                bookTextCache = novel.sortedVolumes
+                    .flatMap { $0.sortedChapters.map(\.content) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: "\n\n")
+            } else {
+                bookTextCache = ""
+            }
+        }
+        sourceCount = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).count
     }
 
     // MARK: 恢复上次会话

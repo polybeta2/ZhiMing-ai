@@ -96,23 +96,56 @@ public enum StyleMetrics {
 
     // MARK: n-gram 查重（S4 护栏：蒸馏产物不得与原文有长片段重合）
 
-    /// 目标：8-gram 重合为 0（参考 magic-distillation 原创性阈值）。
-    /// 归一化忽略标点/空白/大小写后做字符 n-gram 集合比对；返回命中的候选原文（去重）。
-    public static func ngramViolations(in candidates: [String], against original: String, n: Int = 8) -> [String] {
-        let originalGrams = ngrams(of: original, n: n)
-        guard !originalGrams.isEmpty else { return [] }
-        var hits: [String] = []
-        for candidate in candidates {
-            let grams = ngrams(of: candidate, n: n)
-            if let first = grams.first(where: { originalGrams.contains($0) }), !hits.contains(first) {
-                hits.append(first)
-            }
+    /// 原文 n-gram 索引：构建一次、多候选复用（大样本下逐候选重建是性能陷阱）。
+    public struct NgramIndex {
+        fileprivate let grams: Set<String>
+        private let n: Int
+
+        fileprivate init(grams: Set<String>, n: Int) {
+            self.grams = grams
+            self.n = n
         }
-        return hits
+
+        /// 候选命中任意一个原文 n-gram 即视为违规
+        public func hasViolation(_ candidate: String) -> Bool {
+            !violations(in: [candidate]).isEmpty
+        }
+
+        /// 批量查重：按候选文本中的位置顺序返回最早违规窗口（确定性，去重）
+        public func violations(in candidates: [String]) -> [String] {
+            var hits: [String] = []
+            for candidate in candidates {
+                let chars = Array(StyleMetrics.normalized(candidate))
+                guard chars.count >= n else { continue }
+                var found: String?
+                for i in 0...(chars.count - n) {
+                    let window = String(chars[i..<(i + n)])
+                    if grams.contains(window) {
+                        found = window
+                        break
+                    }
+                }
+                if let hit = found, !hits.contains(hit) {
+                    hits.append(hit)
+                }
+            }
+            return hits
+        }
     }
 
+    /// 为原文构建查重索引（大文本构建成本高，务必复用）
+    public static func ngramIndex(of original: String, n: Int = 8) -> NgramIndex {
+        NgramIndex(grams: ngrams(of: original, n: n), n: n)
+    }
+
+    /// 单候选便捷方法（一次性检查用；多候选请用 ngramIndex 复用）
     public static func hasViolation(_ candidate: String, against original: String, n: Int = 8) -> Bool {
-        !ngramViolations(in: [candidate], against: original, n: n).isEmpty
+        ngramIndex(of: original, n: n).hasViolation(candidate)
+    }
+
+    /// 批量便捷方法（一次性检查用；多候选请用 ngramIndex 复用）
+    public static func ngramViolations(in candidates: [String], against original: String, n: Int = 8) -> [String] {
+        ngramIndex(of: original, n: n).violations(in: candidates)
     }
 
     private static func ngrams(of text: String, n: Int) -> Set<String> {
