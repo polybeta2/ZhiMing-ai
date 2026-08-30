@@ -15,6 +15,13 @@ struct ScanJob: Identifiable {
     let continuation: Bool
 }
 
+/// 档案扫描用途：决定归并深度与分析产物粒度
+enum ScanUsage: String, CaseIterable, Identifiable {
+    case fanfic = "同人档案"           // 常规归并：全书时间窗
+    case continuation = "续写档案"     // 深度归并：人物快照/未回收伏笔/剧情弧
+    var id: String { rawValue }
+}
+
 /// 待分析文件信息（档位选择页展示章数/字数用；批量模式复用）
 private struct PendingFile: Identifiable {
     let id = UUID()
@@ -64,6 +71,10 @@ struct SourceProfileLibraryView: View {
     /// 批量复制分析：先选文件（fileImporter），成功后进 BatchCopySheet
     @State private var batchMode = false
     @State private var batchSource: PendingFile?
+    /// 扫描用途：同人（默认）或续写（深度归并，档位选择页选）
+    @State private var chosenUsage: ScanUsage = .fanfic
+    /// origins 面板内的批量复制模式（LiveContainer 通道也能走外部 AI）
+    @State private var originBatchMode = false
 
     private var sortedProfiles: [SourceNovelProfile] {
         store.sourceProfiles.sorted { $0.createdAt > $1.createdAt }
@@ -188,6 +199,18 @@ struct SourceProfileLibraryView: View {
     private var modePickerSheet: some View {
         CompatNavigationView {
             Form {
+                Section {
+                    Picker("扫描用途", selection: $chosenUsage) {
+                        ForEach(ScanUsage.allCases) { u in
+                            Text(u.rawValue).tag(u)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } footer: {
+                    Text(chosenUsage == .continuation
+                         ? "续写档案：深度归并（人物现状快照 / 未回收伏笔 / 剧情弧），档案标注「续写 · 截至第 X 章」"
+                         : "同人档案：常规归并（全书时间窗），用于同人立项创作地基")
+                }
                 Section(footer: Text("快扫每章只取头尾两窗（约 44% 采样，省 token）；精扫按全章整块推进（更完整但更贵）。都可以随时暂停续跑。")) {
                     Picker("扫描档位", selection: $chosenMode) {
                         Text("快扫").tag(ScanMode.fast)
@@ -238,7 +261,7 @@ struct SourceProfileLibraryView: View {
                               let pending = pendingScan else { return }
                         activeJob = ScanJob(text: pending.text, title: pending.title,
                                             mode: chosenMode, batchSize: chosenBatchSize,
-                                            provider: provider, continuation: false)
+                                            provider: provider, continuation: chosenUsage == .continuation)
                         showModePicker = false
                     }
                     .disabled(store.defaultProvider == nil)
@@ -265,11 +288,30 @@ struct SourceProfileLibraryView: View {
                 } else {
                     List {
                         Section {
+                            // 分析方式：普通深度分析 / 批量复制（LiveContainer 通道同样支持外部 AI）
+                            Picker("分析方式", selection: $originBatchMode) {
+                                Text("普通分析").tag(false)
+                                Text("批量复制（外部 AI）").tag(true)
+                            }
+                            .pickerStyle(.segmented)
+                            .listRowBackground(Color.clear)
+                        } footer: {
+                            Text(originBatchMode
+                                 ? "批量复制：把最烧 token 的分析外包给免费外部 AI（DeepSeek App / Gemini），复制提示词 → 外部粘贴回填"
+                                 : "普通分析：直接在此分析，产物即同人/续写档案")
+                        }
+                        Section {
                             ForEach(originFiles, id: \.path) { url in
                                 Button {
+                                    let urlCopy = url
                                     showOriginPicker = false
-                                    // 等 origins sheet 收起后再弹档位选择（避免 sheet 叠 sheet）
-                                    DispatchQueue.main.async { presentScan(url: url) }
+                                    DispatchQueue.main.async {
+                                        if originBatchMode {
+                                            presentOriginBatch(url: urlCopy)
+                                        } else {
+                                            presentScan(url: urlCopy)
+                                        }
+                                    }
                                 } label: {
                                     HStack {
                                         Image(systemName: "doc.text")
@@ -298,6 +340,17 @@ struct SourceProfileLibraryView: View {
                     Button("完成") { showOriginPicker = false }
                 }
             }
+        }
+    }
+
+    /// origins 批量复制：读文本 → 直接进 BatchCopySheet
+    private func presentOriginBatch(url: URL) {
+        switch SourceTextFileLoader.loadText(from: url) {
+        case .failure(let message):
+            importError = message
+        case .success(let body):
+            let title = url.deletingPathExtension().lastPathComponent
+            batchSource = PendingFile(text: body, title: title, chapterCount: 0)
         }
     }
 

@@ -34,6 +34,10 @@ struct ContinuationImportSheet: View {
 
     @State private var activeJob: ScanJob?
     @State private var batchJob: BatchText?
+    /// 从档案库加载
+    @State private var showLibPicker = false
+    /// 待确认使用的同人精度档案（缺续写深度信息，弹提醒后仍允许用）
+    @State private var confirmProfile: SourceNovelProfile?
 
     /// 批量复制入口载荷（sheet item）
     private struct BatchText: Identifiable {
@@ -63,6 +67,7 @@ struct ContinuationImportSheet: View {
             if case .success(let url) = result { loadBook(url: url) }
         }
         .sheet(isPresented: $showOriginPicker) { originPicker }
+        .sheet(isPresented: $showLibPicker) { libraryPicker }
         .sheet(item: $activeJob) { job in
             ScanProgressWrap(job: job, store: store) { profile in
                 onProfileReady(profile)
@@ -88,7 +93,7 @@ struct ContinuationImportSheet: View {
     private var pickSourceView: some View {
         VStack(spacing: AppTheme.spacing[3]) {
             EmptyStateView(title: "选择要续写的小说", systemImage: "square.and.pencil",
-                           description: "导入断更/烂尾/自己未写完的小说 txt，选择从第几章开始续写")
+                           description: "导入断更/烂尾/自己未写完的小说 txt，选择从第几章开始续写；也可直接从档案库加载已分析的档案")
             Button {
                 showImporter = true
             } label: {
@@ -101,9 +106,115 @@ struct ContinuationImportSheet: View {
                 Label("从 origins 文件夹导入", systemImage: "folder.fill.badge.plus")
             }
             .buttonStyle(.bordered)
+            if !store.sourceProfiles.isEmpty {
+                Button {
+                    showLibPicker = true
+                } label: {
+                    Label("从档案库加载（已有分析）", systemImage: "books.vertical.fill")
+                }
+                .buttonStyle(.bordered)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(AppTheme.spacing[3])
+    }
+
+    // MARK: 从档案库加载（续写档案直接进蓝图；同人档案弹精度提醒后仍可用）
+
+    private var libraryPicker: some View {
+        CompatNavigationView {
+            Group {
+                if store.sourceProfiles.isEmpty {
+                    EmptyStateView(title: "档案库是空的", systemImage: "books.vertical",
+                                   description: "先到书库页「原作档案库」导入分析一本小说，即可从这里选择续写")
+                        .padding()
+                } else {
+                    List {
+                        Section(footer: Text("「续写 · 截至第 X 章」档案含深度归并（人物快照/未回收伏笔/剧情弧），可直接续写；无标注的为同人精度档案（全书时间窗）。")) {
+                            ForEach(store.sourceProfiles.sorted { $0.createdAt > $1.createdAt }) { profile in
+                                Button {
+                                    chooseLoaded(profile)
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(profile.title).font(.headline).lineLimit(1)
+                                            Text(profile.continuationFromChapter.map { "续写 · 截至第 \($0) 章" }
+                                                 ?? "同人精度 · \(profile.meta.totalChapters) 章")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: profile.continuationFromChapter != nil
+                                              ? "square.and.pencil"
+                                              : "exclamationmark.triangle")
+                                            .font(.footnote)
+                                            .foregroundStyle(profile.continuationFromChapter != nil
+                                                             ? Color.accentColor : .orange)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("从档案库加载")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { showLibPicker = false }
+                }
+            }
+            .overlay {
+                if let profile = confirmProfile {
+                    confirmFanficProfileCard(profile)
+                }
+            }
+        }
+    }
+
+    /// 同人精度档案用于续写：弹提醒（允许仍用，对应需求「弹提醒不过滤」）
+    private func confirmFanficProfileCard(_ profile: SourceNovelProfile) -> some View {
+        VStack(spacing: AppTheme.spacing[2]) {
+            Text("该档案为同人精度（常规归并），缺少续写需要的深度信息（人物现状快照 / 未回收伏笔 / 剧情弧），续写质量可能打折。")
+                .font(.headline)
+                .multilineTextAlignment(.center)
+            Text("建议改用「续写 · 截至第 X 章」档案，或重新导入原文按续写用途分析。仍要继续吗？")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            HStack {
+                Button("取消") { confirmProfile = nil }
+                    .buttonStyle(.bordered)
+                Button("仍用于续写") {
+                    confirmProfile = nil
+                    finishWithLoaded(profile)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(AppTheme.spacing[3])
+        .frame(maxWidth: .infinity)
+        .background(
+            Color(uiColor: .systemBackground)
+                .opacity(0.96)
+        )
+        .onTapGesture {}   // 挡住下层点击
+    }
+
+    private func chooseLoaded(_ profile: SourceNovelProfile) {
+        if profile.continuationFromChapter != nil {
+            finishWithLoaded(profile)
+        } else {
+            confirmProfile = profile
+        }
+    }
+
+    /// 档案库加载完成：关闭本页并回调建书（进入续写蓝图）
+    private func finishWithLoaded(_ profile: SourceNovelProfile) {
+        showLibPicker = false
+        dismiss()
+        onProfileReady(profile)
     }
 
     /// origins 目录文件列表（LiveContainer 兼容通道）

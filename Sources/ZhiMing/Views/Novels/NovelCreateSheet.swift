@@ -247,7 +247,7 @@ struct NovelCreateSheet: View {
 
     /// 从续写档案建书：绑定档案 + skipsClarification 直达结构规划（复用完整思路立项机制）
     private func createContinuationFromSource(_ profile: SourceNovelProfile) {
-        let upTo = profile.continuationFromChapter ?? 0
+        let upTo = profile.continuationFromChapter
         let novel = Novel(title: "《\(profile.title)》续写", synopsis: "")
         novel.sourceProfileID = profile.id
         // 续写默认继承原作文风档案（若已绑定）
@@ -263,11 +263,19 @@ struct NovelCreateSheet: View {
         novel.chatThreads.append(thread)
         // 进入对话即自动规划续写蓝图（ChatView 的 skipsClarification 路径）
         thread.skipsClarification = true
-        novel.synopsis = """
-        续写《\(profile.title)》：已分析原作前 \(upTo) 章。请基于注入的原作上下文（人物现状、未回收伏笔、剧情弧、世界设定、近期原文）规划续写蓝图：\
-        1) 续写方向与分卷结构；2) 未回收伏笔的回收计划（各伏笔回收的大致位置）；\
-        3) 基调与文风衔接（延续近期原文笔感）；4) 从第 \(upTo + 1) 章开始续写。
-        """
+        if let upTo {
+            novel.synopsis = """
+            续写《\(profile.title)》：已分析原作前 \(upTo) 章。请基于注入的原作上下文（人物现状、未回收伏笔、剧情弧、世界设定、近期原文）规划续写蓝图：\
+            1) 续写方向与分卷结构；2) 未回收伏笔的回收计划（各伏笔回收的大致位置）；\
+            3) 基调与文风衔接（延续近期原文笔感）；4) 从第 \(upTo + 1) 章开始续写。
+            """
+        } else {
+            // 从档案库加载的同人精度档案（无截止章号）：按全书时间窗续写
+            novel.synopsis = """
+            续写《\(profile.title)》（同人精度档案，基于全书时间窗）。请基于注入的原作上下文规划续写蓝图：\
+            1) 续写方向与分卷结构；2) 基调与文风衔接；3) 从原作结局之后继续。
+            """
+        }
 
         store.novels.append(novel)
         store.save()
