@@ -340,7 +340,9 @@ struct ChapterEditorView: View {
             provider: provider,
             instruction: instruction,
             styleCard: styleCard(variant: .writing),
-            antiAIInline: antiAIInline
+            antiAIInline: antiAIInline,
+            sourceWindow: SourceScanInjection.sourceWindow(novel: novel, profiles: store.sourceProfiles,
+                                                           chapter: chapter)
         )
     }
 

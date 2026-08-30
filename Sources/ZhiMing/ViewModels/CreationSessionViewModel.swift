@@ -38,6 +38,10 @@ final class CreationSessionViewModel: ObservableObject {
     var onStreamSettled: ((_ kind: StreamKind, _ message: String?, _ raw: String, _ parsed: Bool) -> Void)?
     private var streamTask: Task<Void, Never>?
 
+    /// 同人注入器：(目标串, 预算) → 原作时间窗文本（target=nil 时返回全书梗概）。
+    /// 由宿主（ChatView）注入闭包，闭包内经 store 查 novel.sourceProfileID 渲染。
+    var sourceWindowProvider: ((_ target: String?, _ maxChars: Int) -> String?)?
+
     private var provider: ProviderConfig?
     private var supplement: String?
     private var brief = ""          // 初始创意
@@ -117,7 +121,9 @@ final class CreationSessionViewModel: ObservableObject {
         guard let provider else { return }
         let messages = PromptTemplates.applying(
             providerExtra: provider.systemPromptExtra,
-            to: PromptTemplates.creationClarify(brief: brief, qaHistory: qaText, supplement: supplement)
+            to: PromptTemplates.creationClarify(
+                brief: brief, qaHistory: qaText, supplement: supplement,
+                sourceContext: sourceWindowProvider?(nil, 4000))
         )
         beginStream(kind: .clarify, messages: messages, provider: provider)
     }
@@ -140,7 +146,8 @@ final class CreationSessionViewModel: ObservableObject {
         let messages = PromptTemplates.applying(
             providerExtra: provider.systemPromptExtra,
             to: PromptTemplates.creationStructure(
-                brief: brief, qaHistory: qaText, feedback: feedback, supplement: supplement)
+                brief: brief, qaHistory: qaText, feedback: feedback, supplement: supplement,
+                sourceContext: sourceWindowProvider?(nil, 8000))
         )
         beginStream(kind: .structure, messages: messages, provider: provider)
     }
@@ -154,7 +161,8 @@ final class CreationSessionViewModel: ObservableObject {
             providerExtra: provider.systemPromptExtra,
             to: PromptTemplates.creationFoundation(
                 brief: brief, qaHistory: qaText, structureJSON: structureJSON,
-                feedback: feedback, supplement: supplement)
+                feedback: feedback, supplement: supplement,
+                sourceContext: sourceWindowProvider?(nil, 8000))
         )
         beginStream(kind: .foundation, messages: messages, provider: provider)
     }
@@ -188,7 +196,9 @@ final class CreationSessionViewModel: ObservableObject {
         let engine = CreationSessionEngine(state: engineState())
         let targets = engine.pendingVolumes(prefix: volumesPerBatch)
         guard !targets.isEmpty else { return }
-        let context = engine.volumeBatchContext(targets: targets)
+        let context = engine.volumeBatchContext(
+            targets: targets,
+            sourceWindow: sourceWindowProvider?(targets.first, 6000))
         let messages = PromptTemplates.applying(
             providerExtra: provider.systemPromptExtra,
             to: PromptTemplates.creationVolumeBatch(context: context, targets: targets, supplement: supplement)
@@ -212,7 +222,9 @@ final class CreationSessionViewModel: ObservableObject {
         let targets = engine.pendingChapters(prefix: chaptersPerBatch)
         guard !targets.isEmpty else { return }
         if phase != .outlining { startOutlining() }
-        let context = engine.batchContext(targets: targets)
+        let context = engine.batchContext(
+            targets: targets,
+            sourceWindow: sourceWindowProvider?(targets.first, 4000))
         let messages = PromptTemplates.applying(
             providerExtra: provider.systemPromptExtra,
             to: PromptTemplates.creationChapterBatch(context: context, targets: targets, supplement: supplement)

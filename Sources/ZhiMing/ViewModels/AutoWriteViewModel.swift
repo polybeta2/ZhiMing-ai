@@ -117,7 +117,11 @@ final class AutoWriteViewModel: ObservableObject {
             base: provider.contextBudgetChars,
             injections: r18Text, styleCard, antiAIText, provider.systemPromptExtra)
         let context = ContextBuilder.buildContinueContext(chapter: chapter, novel: novel,
-                                                          budgetChars: budget, styleCard: styleCard)
+                                                          budgetChars: budget, styleCard: styleCard,
+                                                          sourceWindow: SourceScanInjection.sourceWindow(
+                                                              novel: novel,
+                                                              profiles: store?.sourceProfiles ?? [],
+                                                              chapter: chapter))
         var messages = PromptTemplates.writing(context: context, wordTarget: wordTarget, extra: nil)
         if let r18 = r18Text { messages = PromptTemplates.applying(providerExtra: r18, to: messages) }
         if let antiAI = antiAIText { messages = PromptTemplates.applying(providerExtra: antiAI, to: messages) }

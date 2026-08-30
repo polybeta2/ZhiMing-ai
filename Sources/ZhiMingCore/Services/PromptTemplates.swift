@@ -60,7 +60,9 @@ public enum PromptTemplates {
     // MARK: 分阶段立项
 
     /// supplement：R18 规范等补充约束，拼接在系统提示词之后、用户输入之前。
-    public static func creationClarify(brief: String, qaHistory: String, supplement: String?) -> [LLMMessage] {
+    /// sourceContext：同人场景的原作档案梗概（nil = 普通立项）；非 nil 时追加同人遵守度提问。
+    public static func creationClarify(brief: String, qaHistory: String, supplement: String?,
+                                       sourceContext: String? = nil) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationClarify)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -70,11 +72,14 @@ public enum PromptTemplates {
         if !qaHistory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             user += "\n\n【此前问答】\n\(qaHistory.trimmingCharacters(in: .whitespacesAndNewlines))"
         }
+        appendSourceContext(&user, sourceContext: sourceContext, withAdherenceQuestion: true)
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
     /// feedback：结构提案阶段的修改意见（nil = 首次规划）
-    public static func creationStructure(brief: String, qaHistory: String, feedback: String?, supplement: String?) -> [LLMMessage] {
+    public static func creationStructure(brief: String, qaHistory: String, feedback: String?,
+                                         supplement: String?,
+                                         sourceContext: String? = nil) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationStructure)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -87,12 +92,14 @@ public enum PromptTemplates {
         if let feedback = feedback?.trimmingCharacters(in: .whitespacesAndNewlines), !feedback.isEmpty {
             user += "\n\n【修改意见】\n\(feedback)"
         }
+        appendSourceContext(&user, sourceContext: sourceContext, withAdherenceQuestion: false)
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
     }
 
     /// structureJSON：用户已确认的卷章结构；feedback：基础蓝图阶段的修改意见（重生成用）
     public static func creationFoundation(brief: String, qaHistory: String, structureJSON: String,
-                                   feedback: String?, supplement: String?) -> [LLMMessage] {
+                                   feedback: String?, supplement: String?,
+                                   sourceContext: String? = nil) -> [LLMMessage] {
         var system = PromptLibrary.shared.resolvedText(for: PromptID.creationFoundation)
         if let supplement = supplement?.trimmingCharacters(in: .whitespacesAndNewlines),
            !supplement.isEmpty {
@@ -109,7 +116,24 @@ public enum PromptTemplates {
         if let feedback = feedback?.trimmingCharacters(in: .whitespacesAndNewlines), !feedback.isEmpty {
             user += "\n\n【修改意见】\n\(feedback)"
         }
+        appendSourceContext(&user, sourceContext: sourceContext, withAdherenceQuestion: false)
         return [.init(role: .system, content: system), .init(role: .user, content: user)]
+    }
+
+    /// 同人节：追加【原作档案】段；需要先确认遵守度时（澄清）带上提问
+    private static func appendSourceContext(_ user: inout String, sourceContext: String?,
+                                            withAdherenceQuestion: Bool) {
+        guard let source = sourceContext?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !source.isEmpty else { return }
+        if withAdherenceQuestion {
+            user += """
+
+            【同人创作要求】
+            本作是基于下方原作档案创作的同人。请先向用户确认同人遵守度：严格原作线（情节/结局/人物状态遵循原作）/ IF 分歧线（自选分歧点改写原作走向）/ 仅借设定（只借世界观与人物，自由展开）。
+            写作时人物言行/能力/关系不得 OOC，原作已确立的事实不可改写，时间线必须合法。
+            """
+        }
+        user += "\n\n【原作档案】\n\(source)"
     }
 
     /// 卷纲批次：只为 targets 中的卷生成卷纲（每批 1~5 卷）

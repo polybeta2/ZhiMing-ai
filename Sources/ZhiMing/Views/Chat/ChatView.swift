@@ -152,6 +152,15 @@ struct ChatView: View {
             creation.onStreamSettled = { kind, message, raw, parsed in
                 settleCreation(kind: kind, message: message, raw: raw, parsed: parsed)
             }
+            // 同人注入：从书库解析 novel 绑定的原作档案，按目标串渲染时间窗
+            creation.sourceWindowProvider = { target, maxChars in
+                if let target, !target.isEmpty {
+                    return SourceScanInjection.sourceWindow(
+                        novel: novel, profiles: store.sourceProfiles, target: target, maxChars: maxChars)
+                }
+                return SourceScanInjection.sourceContext(
+                    novel: novel, profiles: store.sourceProfiles, maxChars: maxChars)
+            }
             if isCreation {
                 // 恢复上次进度（SQLite）：阶段/问答/提案/蓝图原样回来，AI上下文不丢失
                 creation.attachAndRestore(threadID: thread.id)

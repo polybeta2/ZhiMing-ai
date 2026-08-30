@@ -69,7 +69,8 @@ public enum ContextBuilder {
     }
 
     public static func buildContinueContext(chapter: Chapter, novel: Novel, budgetChars: Int,
-                                            styleCard: String? = nil) -> BuiltContext {
+                                        styleCard: String? = nil,
+                                        sourceWindow: String? = nil) -> BuiltContext {
         var required: [String] = []
         var high: [(String, String)] = []
         var optional: [(String, String)] = []
@@ -82,6 +83,10 @@ public enum ContextBuilder {
         if let card = styleCard, !card.isEmpty {
             // 文风档案卡（渲染器已按 PromptLimits.styleProfileCap 截断，此处不再裁剪）
             required.append(card)
+        }
+        if let window = sourceWindow, !window.isEmpty {
+            // 同人：当前章所在原作阶段的防 OOC 注入（人物卡/事件/设定）
+            required.append("【原作该阶段人物与事件】\n\(window)")
         }
         appendPrevProseTail(chapter: chapter, novel: novel, required: &required)
         if let outline = chapter.detailedOutline, !outline.isEmpty {

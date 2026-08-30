@@ -13,6 +13,9 @@ struct NovelCreateSheet: View {
     private enum Mode { case choose, blank, oneLine, fullIdea }
     @State private var mode: Mode = .choose
 
+    // 同人立项：档案选择
+    @State private var showFanficPicker = false
+
     // 空白建书表单
     @State private var title = ""
     @State private var synopsis = ""
@@ -92,9 +95,22 @@ struct NovelCreateSheet: View {
             ) {
                 mode = .fullIdea
             }
+            entryCard(
+                icon: "books.vertical",
+                title: "同人立项",
+                subtitle: "选择一本原作档案，围绕其人物与事件创作不 OOC 的同人"
+            ) {
+                showFanficPicker = true
+            }
+            if store.sourceProfiles.isEmpty {
+                Text("还没有原作档案：先到书库页「原作档案库」导入 txt 分析。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
         }
         .padding(AppTheme.spacing[3])
+        .sheet(isPresented: $showFanficPicker) { fanficProfilePicker }
     }
 
     private func entryCard(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
@@ -120,6 +136,84 @@ struct NovelCreateSheet: View {
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: AppTheme.radiusCard))
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - 同人立项
+
+    /// 档案选择列表：未完成分析的档案置灰并引导完成扫描
+    private var fanficProfilePicker: some View {
+        CompatNavigationView {
+            Group {
+                if store.sourceProfiles.isEmpty {
+                    EmptyStateView(title: "还没有原作档案", systemImage: "books.vertical",
+                                   description: "先到书库页「原作档案库」导入一本 txt 小说完成分析，才能以它为地基创作同人。")
+                        .padding()
+                } else {
+                    List {
+                        ForEach(store.sourceProfiles) { profile in
+                            Button {
+                                createFromSource(profile)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(profile.title).font(.headline)
+                                        Text("\(profile.meta.totalChapters) 章 · 人物 \(profile.characters.count) · 事件 \(profile.timeline.count)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if profile.scanState.isComplete {
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote)
+                                            .foregroundStyle(.tertiary)
+                                    } else {
+                                        Text("分析未完成")
+                                            .font(.caption2.bold())
+                                            .foregroundColor(.orange)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color.orange.opacity(0.12), in: Capsule())
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!profile.scanState.isComplete)
+                            .opacity(profile.scanState.isComplete ? 1 : 0.55)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("选择原作档案")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("取消") { showFanficPicker = false }
+                }
+            }
+        }
+    }
+
+    /// 从原作档案建同人书：绑定 sourceProfileID，继承档案绑定的文风
+    private func createFromSource(_ profile: SourceNovelProfile) {
+        let novel = Novel(title: "《\(profile.title)》同人", synopsis: "")
+        novel.sourceProfileID = profile.id
+        // 自动继承档案绑定的文风（书内可换绑）
+        novel.activeStyleProfileID = profile.styleProfileID
+        novel.accentColorHex = AppTheme.accentPresets[0].hexString
+
+        let volume = Volume(name: "第一卷", sortOrder: 1)
+        volume.novel = novel
+        novel.volumes.append(volume)
+
+        // 立项会话：从澄清开始（会先确认同人遵守度：严格原作线/IF 线/仅借设定）
+        let thread = ChatThread(purpose: "creation")
+        thread.novel = novel
+        novel.chatThreads.append(thread)
+
+        store.novels.append(novel)
+        store.save()
+        showFanficPicker = false
+        dismiss()
+        onCreated(novel.id)
     }
 
     // MARK: - 空白建书
