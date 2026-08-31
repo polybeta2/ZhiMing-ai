@@ -62,6 +62,14 @@ struct ChapterEditorView: View {
                 Text(chapter.title)
                     .font(.headline)
                     .lineLimit(1)
+                if chapter.isOriginal {
+                    Text("原作 · 只读")
+                        .font(.caption2.bold())
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.12), in: Capsule())
+                }
                 Spacer(minLength: AppTheme.spacing[1])
                 Text("\(text.count) 字")
                     .font(.caption.monospacedDigit())
@@ -76,6 +84,7 @@ struct ChapterEditorView: View {
             TextEditor(text: $text)
                 .font(.body)
                 .padding(.horizontal, AppTheme.spacing[2])
+                .disabled(chapter.isOriginal)   // 原作章节只读（正文锚定，防误改）
 
             if vm.phase != .idle {
                 DraftCard(
@@ -102,7 +111,11 @@ struct ChapterEditorView: View {
                         .foregroundColor(.red)
                         .padding(.horizontal, AppTheme.spacing[3])
                 }
-                aiToolbar
+                if chapter.isOriginal {
+                    originalHintBar
+                } else {
+                    aiToolbar
+                }
             }
         }
         .animation(AppTheme.Spring.standard, value: vm.phase)
@@ -180,6 +193,16 @@ struct ChapterEditorView: View {
     }
 
     // MARK: - 工具条
+
+    /// 原作章节提示条（替代 AI 工具条：原文仅供阅读与续写锚定）
+    private var originalHintBar: some View {
+        Label("原作章节：只读。续写请在新卷的章节中进行（衔接锚点会自动携带本章原文）", systemImage: "lock.fill")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, AppTheme.spacing[1])
+            .background(Color(uiColor: .secondarySystemBackground))
+    }
 
     private var aiToolbar: some View {
         ScrollView(.horizontal, showsIndicators: false) {

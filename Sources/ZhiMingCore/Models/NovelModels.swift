@@ -275,6 +275,8 @@ public final class Chapter: Identifiable, ObservableObject, Codable {
 
     @Published public var snapshots: [ChapterSnapshot] = []
     @Published public var summary: ChapterSummary?
+    /// 原作章节（续写导入的 1~X 章）：只读不可编辑，仅作正文锚定与衔接
+    @Published public var isOriginal: Bool = false
 
     public init(id: UUID = UUID(), title: String, sortOrder: Int) {
         self.id = id
@@ -287,7 +289,7 @@ public final class Chapter: Identifiable, ObservableObject, Codable {
 
     public enum CodingKeys: String, CodingKey {
         case id, title, detailedOutline, sceneCards, content, sortOrder, wordCount, updatedAt
-        case snapshots, summary
+        case snapshots, summary, isOriginal
     }
 
     public required init(from decoder: Decoder) throws {
@@ -302,6 +304,7 @@ public final class Chapter: Identifiable, ObservableObject, Codable {
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
         snapshots = try c.decode([ChapterSnapshot].self, forKey: .snapshots)
         summary = try c.decodeIfPresent(ChapterSummary.self, forKey: .summary)
+        isOriginal = try c.decodeIfPresent(Bool.self, forKey: .isOriginal) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -316,6 +319,7 @@ public final class Chapter: Identifiable, ObservableObject, Codable {
         try c.encode(updatedAt, forKey: .updatedAt)
         try c.encode(snapshots, forKey: .snapshots)
         try c.encodeIfPresent(summary, forKey: .summary)
+        try c.encodeIfPresent(isOriginal ? true : nil, forKey: .isOriginal)   // 旧档不含 false，减噪
     }
 }
 

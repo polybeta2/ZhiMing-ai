@@ -1,6 +1,7 @@
 #if os(iOS) || os(macOS)
 import Foundation
 import SQLite3
+import ZhiMingCore
 
 /// Swift 模块未导出 SQLITE_TRANSIENT 宏：显式桥接为「绑定后由 SQLite 复制一份」的析构回调
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -40,6 +41,8 @@ enum SourceScanCache {
         CREATE TABLE IF NOT EXISTS reduce_texts (
             profile TEXT NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL,
             PRIMARY KEY (profile, seq));
+        CREATE TABLE IF NOT EXISTS scan_meta (
+            profile TEXT NOT NULL, k TEXT NOT NULL, v INTEGER, PRIMARY KEY (profile, k));
         """
         sqlite3_exec(handle, create, nil, nil, nil)
         return db
@@ -121,12 +124,58 @@ enum SourceScanCache {
         return result
     }
 
+    /// 读回全部已完成块的微摘要（滚动归并恢复：断点后已 done 未归并的块从这里续上）
+    static func loadMicros(profile: UUID) -> [(pos: Int, micro: SourceMicroSummarizer.MicroSummary)] {
+        guard let db = openIfNeeded() else { return [] }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT idx, payload FROM chunk_meta WHERE profile = ? AND status = 'done' AND payload IS NOT NULL ORDER BY idx;",
+                                 -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (profile.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        var result: [(Int, SourceMicroSummarizer.MicroSummary)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW,
+              let cString = sqlite3_column_text(stmt, 1),
+              let data = String(cString: cString).data(using: .utf8),
+              let micro = try? JSONDecoder().decode(SourceMicroSummarizer.MicroSummary.self, from: data) {
+            result.append((Int(sqlite3_column_int(stmt, 0)), micro))
+        }
+        return result
+    }
+
+    /// 已归并到的块进度（滚动归并：仅 pos 大于该值的 done 块需要归并）
+    static func reducedUpto(profile: UUID) -> Int {
+        guard let db = openIfNeeded() else { return -1 }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT v FROM scan_meta WHERE profile = ? AND k = 'reduced_upto';",
+                                 -1, &stmt, nil) == SQLITE_OK else { return -1 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (profile.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int(stmt, 0)) }
+        return -1
+    }
+
+    /// 更新归并进度（单调递增；归并完成一批后调用）
+    static func setReducedUpto(profile: UUID, pos: Int) {
+        guard let db = openIfNeeded() else { return }
+        let sql = """
+        INSERT INTO scan_meta (profile, k, v) VALUES (?, 'reduced_upto', ?)
+        ON CONFLICT(profile, k) DO UPDATE SET v = excluded.v;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (profile.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 2, Int32(pos))
+        sqlite3_step(stmt)
+    }
+
     /// 清空某档案的全部扫描明细（换档重扫/删除档案时调用）
     static func clear(profile: UUID) {
         guard let db = openIfNeeded() else { return }
         let deletes = [
             "DELETE FROM chunk_meta WHERE profile = ?;",
             "DELETE FROM reduce_texts WHERE profile = ?;",
+            "DELETE FROM scan_meta WHERE profile = ?;",
         ]
         for d in deletes {
             var stmt: OpaquePointer?

@@ -265,9 +265,40 @@ final class SourceScanViewModel: ObservableObject {
                          done: Set<Int>, pid: UUID, priorIn: Int, priorOut: Int,
                          mapConfig: GenerationConfig, reduceConfig: GenerationConfig,
                          finalConfig: GenerationConfig) async {
-        var micros: [SourceMicroSummarizer.MicroSummary] = []
         var inTotal = priorIn
         var outTotal = priorOut
+
+        // ---- 滚动归并（边分析边归并）：Map 期间攒满一批即发起归并请求，与 Map 并发推进 ----
+        let reduceBatch = 40
+        let upto = SourceScanCache.reducedUpto(profile: pid)
+        // 恢复：已 done 未归并的块（断点续跑时旧会话的分析成果不丢）
+        var pendingReduce: [(pos: Int, micro: SourceMicroSummarizer.MicroSummary)] =
+            SourceScanCache.loadMicros(profile: pid).filter { $0.pos > upto }
+        var reduceTasks: [Task<Void, Never>] = []
+        var stageSummaries = SourceScanCache.loadReduceStrings(profile: pid)
+        // 归并序号独立计数（saveReduce 的 seq 键；不能复用局部 stageSummaries.count——它在 Map 期间不更新）
+        var nextSeq = stageSummaries.count
+        await MainActor.run { [weak self] in self?.stageSummaries = stageSummaries }
+
+        // 发起一批归并（并发 Task）：完成即落 SQLite 并推进 reduced_upto
+        func spawnReduce() {
+            let batch = pendingReduce
+            pendingReduce = []
+            guard !batch.isEmpty else { return }
+            let seq = nextSeq
+            nextSeq += 1
+            reduceTasks.append(Task { [weak self] in
+                guard let self else { return }
+                let prompt = SourceReducer.batchPrompt(micros: batch.map(\.micro), batchChars: 12000)
+                let (reply, drained) = await self.fetchWithRetry(
+                    [LLMMessage(role: .user, content: prompt)], client: client, config: reduceConfig)
+                guard drained, !reply.isEmpty else { return }
+                SourceScanCache.saveReduce(profile: pid, seq: seq, text: reply)
+                SourceScanCache.setReducedUpto(profile: pid, pos: batch.map(\.pos).max() ?? 0)
+                let snapshot = SourceScanCache.loadReduceStrings(profile: pid)
+                await MainActor.run { [weak self] in self?.stageSummaries = snapshot }
+            })
+        }
 
         // ---- Map：连续未完成块成组，一次请求分析 batchSize 章（跳过 done） ----
         var pos = 0
@@ -310,7 +341,7 @@ final class SourceScanViewModel: ObservableObject {
             let elapsed = Date().timeIntervalSince(t0)
             mapTimes.append(elapsed / Double(group.count))     // 折算为秒/章
 
-            // 落库 & 进度（同章多块共用同一份摘要）
+            // 落库 & 进度 & 滚动归并缓冲（同章多块共用同一份摘要）
             for item in group {
                 if Task.isCancelled { break }
                 inTotal += item.text.count / 2
@@ -319,15 +350,17 @@ final class SourceScanViewModel: ObservableObject {
                 SourceScanCache.mark(profile: pid, idx: item.pos, status: "done",
                                      payload: microPayload(micro),
                                      tokensIn: inTotal, tokensOut: outTotal)
+                pendingReduce.append((item.pos, micro))
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self.doneChunks = min(self.doneChunks + 1, self.totalChunks)
                     self.tokensIn = inTotal
                     self.tokensOut = outTotal
                 }
-                micros.append(micro)
             }
             updateEstimate()
+            // 攒满一批即并发归并（Map 继续推进，归并穿插进行）
+            if pendingReduce.count >= reduceBatch { spawnReduce() }
             pos = g
         }
         guard !Task.isCancelled else {
@@ -336,27 +369,12 @@ final class SourceScanViewModel: ObservableObject {
             return
         }
 
-        // ---- Reduce 一段：按批 40 条归并为阶段摘要（网络失败重试 3 次） ----
+        // ---- 收尾：归并剩余不足一批的缓冲，等待全部归并任务完成 ----
+        spawnReduce()
         await MainActor.run { [weak self] in self?.phase = .reducing }
-        let batchSize = 40
-        var stageSummaries: [String] = SourceScanCache.loadReduceStrings(profile: pid)
-        for batchStart in stride(from: 0, to: micros.count, by: batchSize) {
-            if Task.isCancelled { break }
-            let slice = Array(micros[batchStart..<min(batchStart + batchSize, micros.count)])
-            let prompt = SourceReducer.batchPrompt(micros: slice, batchChars: 12000)
-            let msgs = [LLMMessage(role: .user, content: prompt)]
-            let (reply, drained) = await fetchWithRetry(msgs, client: client, config: reduceConfig)
-            guard drained else {
-                await MainActor.run { [weak self] in self?.cancel() }
-                return
-            }
-            let seq = stageSummaries.count
-            stageSummaries.append(reply)
-            SourceScanCache.saveReduce(profile: pid, seq: seq, text: reply)
-            await MainActor.run { [weak self] in
-                self?.stageSummaries = stageSummaries
-            }
-        }
+        for task in reduceTasks { await task.value }
+        stageSummaries = SourceScanCache.loadReduceStrings(profile: pid)
+        await MainActor.run { [weak self] in self?.stageSummaries = stageSummaries }
         guard !Task.isCancelled else {
             endBackgroundTask()
             progress.finish()

@@ -20,6 +20,9 @@ struct ZhiMingApp: App {
     init() {
         // iOS 15：TextEditor 无 scrollContentBackground，用 UITextView 外观统一透明背景（深色模式正确）
         UITextView.appearance().backgroundColor = .clear
+        // 启动即确保 Documents/origins 存在（UIFileSharingEnabled 已暴露 Documents，
+        // 文件 App 首次可见即有该目录可放入 txt；否则需进过档案库页面才创建）
+        _ = SourceOriginFolder.directoryURL
     }
 
     var body: some Scene {

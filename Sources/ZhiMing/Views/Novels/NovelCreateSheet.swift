@@ -245,7 +245,8 @@ struct NovelCreateSheet: View {
 
     // MARK: - 续写建书
 
-    /// 从续写档案建书：绑定档案 + skipsClarification 直达结构规划（复用完整思路立项机制）
+    /// 从续写档案建书：绑定档案 + skipsClarification 直达结构规划（复用完整思路立项机制）。
+    /// 续写档案额外导入：原作 1~X 章只读章节、角色卡、世界观、未回收伏笔台账。
     private func createContinuationFromSource(_ profile: SourceNovelProfile) {
         let upTo = profile.continuationFromChapter
         let novel = Novel(title: "《\(profile.title)》续写", synopsis: "")
@@ -254,9 +255,51 @@ struct NovelCreateSheet: View {
         novel.activeStyleProfileID = profile.styleProfileID
         novel.accentColorHex = AppTheme.accentPresets[0].hexString
 
-        let volume = Volume(name: "第一卷", sortOrder: 1)
+        // 原作卷：续写档案带边车原文 → 导入 1~X 章为只读章节（正文锚定与衔接用）
+        if let upTo, profile.hasSourceText,
+           let source = ContinuationStore.load(profileID: profile.id) {
+            let originalVolume = Volume(name: "原作（\(upTo) 章）", sortOrder: 1)
+            originalVolume.novel = novel
+            novel.volumes.append(originalVolume)
+            for (i, chapter) in StyleChapterSampler.split(source).prefix(upTo).enumerated() {
+                let ch = Chapter(title: chapter.marker, sortOrder: i + 1)
+                ch.volume = originalVolume
+                ch.content = chapter.body
+                ch.wordCount = chapter.body.count
+                ch.isOriginal = true
+                originalVolume.chapters.append(ch)
+            }
+        }
+
+        let volume = Volume(name: "第一卷", sortOrder: novel.volumes.count + 1)
         volume.novel = novel
         novel.volumes.append(volume)
+
+        // 角色卡：CanonCharacter → CharacterCard（现状快照进 physicalState）
+        for canon in profile.characters {
+            let card = CharacterCard(name: canon.name)
+            card.aliases = canon.aliases
+            card.appearance = canon.appearance
+            card.personality = canon.personality
+            card.background = [canon.oneLine, canon.abilities].compactMap { $0 }.filter { !$0.isEmpty }
+                .joined(separator: "；")
+            card.physicalState = canon.currentState
+            novel.characters.append(card)
+        }
+        // 世界观：CanonWorldEntry → WorldEntry（自由分类映射到固定五类）
+        for world in profile.worldbuilding {
+            let entry = WorldEntry(category: Self.mappedWorldCategory(world.category), name: world.name, content: world.content)
+            entry.novel = novel
+            novel.worldEntries.append(entry)
+        }
+        // 未回收伏笔 → 伏笔台账（status=open，planted 章号按原作卷第 1 卷计）
+        for thread in profile.openThreads {
+            novel.foreshadowings.append(Foreshadowing(
+                title: thread.title, detail: thread.detail,
+                plantedVolumeIndex: thread.plantedChapter.map { _ in 1 },
+                plantedChapterOrder: thread.plantedChapter,
+                status: .open))
+        }
 
         let thread = ChatThread(purpose: "creation")
         thread.novel = novel
@@ -281,6 +324,17 @@ struct NovelCreateSheet: View {
         store.save()
         dismiss()
         onCreated(novel.id)
+    }
+
+    /// 原作档案自由分类 → App 固定五类（含关键词启发，未命中归「其他」）
+    private static func mappedWorldCategory(_ raw: String) -> String {
+        switch raw {
+        case let s where s.contains("地点") || s.contains("场景"): return "地点"
+        case let s where s.contains("势力") || s.contains("组织") || s.contains("阵营"): return "势力"
+        case let s where s.contains("规则") || s.contains("体系") || s.contains("设定"): return "规则"
+        case let s where s.contains("物品") || s.contains("道具") || s.contains("装备"): return "物品"
+        default: return "其他"
+        }
     }
 
     // MARK: - 空白建书
