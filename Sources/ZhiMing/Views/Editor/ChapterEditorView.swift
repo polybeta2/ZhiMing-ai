@@ -167,7 +167,8 @@ struct ChapterEditorView: View {
                     draft: text,
                     draftTitle: chapter.title,
                     evalCard: styleCard(variant: .eval) ?? "（未启用文风档案，仅按通用编辑标准体检）",
-                    provider: provider
+                    provider: provider,
+                    onApply: { newText in applyEvalDraft(newText) }
                 )
             }
         }
@@ -190,6 +191,14 @@ struct ChapterEditorView: View {
     private func hiddenLink<Destination: View>(destination: Destination, isActive: Binding<Bool>) -> some View {
         NavigationLink(destination: destination, isActive: isActive) { EmptyView() }
             .hidden()
+    }
+
+    /// 应用风格体检的改写结果：先建快照（历史不丢）再写回编辑器
+    private func applyEvalDraft(_ newText: String) {
+        guard newText != text, !newText.isEmpty else { return }
+        SnapshotService.snapshot(chapter, trigger: "styleEval")
+        text = newText            // 现有 zmOnChange(of: text) 自动同步 chapter.content 并防抖保存
+        ZMHaptics.success()
     }
 
     // MARK: - 工具条
